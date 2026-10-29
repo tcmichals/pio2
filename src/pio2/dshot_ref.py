@@ -16,6 +16,7 @@ GCR_ENCODE = [0x19, 0x1B, 0x12, 0x13, 0x1D, 0x15, 0x16, 0x17,
 GCR_DECODE = {code: nib for nib, code in enumerate(GCR_ENCODE)}
 
 
+# @impl [SPEC-PIO-12] docs/SPECIFICATION.md
 def dshot_frame(value: int, telemetry: bool = False, bidir: bool = True) -> int:
     """16-bit DShot frame: 11-bit value (0 = disarmed, 1..47 commands, 48..2047 throttle),
     telemetry request bit, 4-bit CRC (inverted for bidirectional DShot)."""
@@ -56,6 +57,7 @@ def samples_from_words(words) -> list:
     return [(w >> (31 - i)) & 1 for w in words for i in range(32)]
 
 
+# @impl [SPEC-PIO-12] docs/SPECIFICATION.md
 def decode_samples(samples, samples_per_bit: float):
     """Betaflight-style decode of raw samples (starting at the first low sample).
     Returns the 12-bit eee:mmmmmmmmm value, or None if invalid / no reply."""

@@ -13,7 +13,7 @@ written in SystemVerilog for FPGAs, plus the tools to write, test and **see** PI
 * `tests/cocotb/`: cocotb regression of the tile on Verilator.
 * `docs/`: specification (`[SPEC-PIO-*]` requirements), architecture, debugger design, links.
 
-The design goal of the debugger is in [`docs/debugger.md`](docs/debugger.md): single-step the real
+The design goal of the debugger is in [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md): single-step the real
 RTL (not a separate software model) one clock or one instruction at a time, with every state
 machine's registers, FIFOs, clock divider phase, stall reason and pins visible.
 
@@ -25,7 +25,7 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
 * **pio2 is the simulation home of the PIO.** Every way of running a PIO program without silicon
   lives here: the RTL on Verilator (primary, also the debugger's engine), the same RTL on Icarus
   through cocotb, and independent software reference emulators for comparison (diff mode).
-* **One host link, like a small NIC** ([`docs/interconnect.md`](docs/interconnect.md)): SPI or
+* **One host link, like a small NIC** ([`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md)): SPI or
   Dual-SPI with an interrupt pin, carrying frames of at most 128 bytes with CRC32, NIC-style
   registers (`ISR` / `IMR`, frame queues, error counters), and numbered channels: channel 0 for
   addressed register access, the others as streams. Inside the FPGA everything is Wishbone B4
@@ -38,18 +38,21 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
   has `pio_event`: tile, SM, event type, PC, duration, next to `tlp_push` / `tlp_pop`). Simulation
   traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
   simulated run can be compared with a board run event by event.
+* **Zynq: AXI only at the edge.** On the Zynq-7000 the host adapter is an AXI4-Lite to Wishbone bridge
+  and AXI-Stream ports on the DMA rings ([SPEC-ICN-11]); the core inside stays Wishbone.
 * **Example boards: Tang Nano 9K and Tang Nano 20K** (Gowin, open-source flow). The board tops,
   pin constraints and bitstream build stay in AbstractX (`hw/tang9k/`, `hw/tang_nano20k/`,
   `make -f hw/Makefile tang9k|tang_nano20k`); pio2 documents how to run its example programs on
-  them and connect the debugger.
+  them and connect the debugger. On the Tang boards the PIO **replaces** the hardwired DShot, ESC
+  passthrough and serial cores: those become PIO programs ([SPEC-ICN-12]).
 * **A Wokwi-style simulator** (like <https://wokwi.com/pi-pico>), built with imgui-bundle: a parts
   canvas with the tile's pins wired to LEDs, buttons, a UART terminal, a WS2812 strip, an ESC with a
   motor model, an SPI IMU, a logic analyzer; plus the debugger views (per-SM registers, FIFOs,
   clock divider, timeline) and single step by clock or instruction, forward and back. Unlike
-  software-model simulators it runs the real RTL. See [`docs/debugger.md`](docs/debugger.md).
+  software-model simulators it runs the real RTL. See [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md).
 * **Examples** that ship as debugger sessions: Raspberry Pi pico-examples, Wokwi Pi Pico projects
   as a behaviour reference, Betaflight's PIO programs, our DShot / ESC serial programs, and the
-  IMU auto-DMA path (DRDY -> SPI burst -> TLP frames). Details: [`docs/debugger.md`](docs/debugger.md).
+  IMU auto-DMA path (DRDY -> SPI burst -> TLP frames). Details: [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md).
 
 ```
           .pio  ──pioasm──►  image
@@ -123,12 +126,17 @@ uv run pio2-setup-tools --check
 | pioasm | assembling `.pio` sources | Raspberry Pi pico-sdk (`$PIOASM`, `~/.tools/pioasm/pioasm`) |
 | cocotb, pytest, imgui-bundle | tests, debugger GUI | PyPI through uv |
 
+## Status
+
+See [`TODO.md`](TODO.md) (where we are, next steps) and [`engineering_log.md`](engineering_log.md).
+Rules for contributors and agents: [`AGENTS.md`](AGENTS.md) (AbstractX SpecTrace format).
+
 ## Documentation
 
 * [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md): requirements (`[SPEC-PIO-*]`), RP2040 parity checklist
 * [`docs/architecture.md`](docs/architecture.md): block diagram, register map, ports
-* [`docs/debugger.md`](docs/debugger.md): visual single-step debugger and parts canvas design
-* [`docs/interconnect.md`](docs/interconnect.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, Wishbone, DMA, barectf trace
+* [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md): visual single-step debugger and parts canvas design
+* [`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, Wishbone, DMA, barectf trace
 * [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)
 * [`docs/references.md`](docs/references.md): links to the Raspberry Pi datasheets and tools (not copied here)
 * [`docs/provenance.md`](docs/provenance.md): where every file came from

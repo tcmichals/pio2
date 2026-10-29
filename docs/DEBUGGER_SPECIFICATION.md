@@ -1,7 +1,7 @@
 # pio2 Visual Debugger: Design
 
 Status: design, nothing implemented yet (2026-10-29). Requirements carry `[SPEC-DBG-*]` tags; code
-that implements one carries `@impl [SPEC-DBG-nn] docs/debugger.md`.
+that implements one carries `@impl [SPEC-DBG-nn] docs/DEBUGGER_SPECIFICATION.md`.
 
 ## 1. Goal
 
@@ -62,6 +62,8 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 * **Requirement**: `libpio2sim.so` exports a C ABI: create/destroy, reset, Wishbone read/write, set input
   pins, read pin outputs and directions, step N clocks, read per-SM state, save/restore a snapshot,
   open/close an FST trace.
+* **Verified by**: `host-tests` (`tests/test_debug_session.py`)
+* **Implementation Target**: `src/pio2/debug/sim/`, `src/pio2/debug/sim/pio2sim.vlt`
 
 ### `[SPEC-DBG-02]` Visible State per State Machine
 * **Requirement**: per SM and per cycle: PC, the instruction at PC (disassembled), X, Y, ISR and OSR with
@@ -70,6 +72,8 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
   divider integer count and fractional accumulator, enable and wrap bounds.
 * **Requirement**: tile level: 8 IRQ flags, pin outputs and directions, input pins, the shared
   instruction memory.
+* **Verified by**: `host-tests` (`tests/test_debug_session.py`: state matches cocotb per cycle)
+* **Implementation Target**: `src/pio2/debug/session.py`
 
 ### `[SPEC-DBG-03]` Stepping
 * **Requirement**: step one system clock; step one instruction of a chosen SM (runs until that SM
@@ -77,31 +81,43 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
   run N cycles; run until a breakpoint; pause.
 * **Requirement**: "instruction retired" is derived from the exposed state (PC change, or same PC with
   the delay counter and stall cleared), and the rule is tested against the conformance programs.
+* **Verified by**: `host-tests` (`tests/test_debug_stepping.py`: conformance programs stepped by instruction)
+* **Implementation Target**: `src/pio2/debug/session.py`
 
 ### `[SPEC-DBG-04]` Breakpoints and Watchpoints
 * **Requirement**: breakpoints on PC per SM; watchpoints on a pin edge, an IRQ flag, a FIFO level, X/Y
   value, or a stall reason; each stops at the cycle it becomes true.
+* **Verified by**: `host-tests` (`tests/test_debug_breakpoints.py`)
+* **Implementation Target**: `src/pio2/debug/session.py`
 
 ### `[SPEC-DBG-05]` Logic Analyzer and Timeline
 * **Requirement**: ImPlot view of selected pins and per-SM tracks (instruction, stall, side-set) over
   cycles, with cursors, zoom, cycle and time readout (system clock in Hz is configurable), and a
   measurement between two cursors.
 * **Requirement**: export the session to FST (GTKWave) and to a JSON trace.
+* **Verified by**: `host-tests` (`tests/test_debug_export.py`: FST and JSON written and re-read)
+* **Implementation Target**: `src/pio2/debug/trace.py`, `src/pio2/gui/analyzer.py`
 
 ### `[SPEC-DBG-06]` Reverse Step
 * **Requirement**: snapshots every N cycles (default 1024, bounded memory); stepping back restores the
   nearest earlier snapshot and runs forward to the target cycle; stimulus is replayed from the
   recorded input trace so the result is identical.
+* **Verified by**: `host-tests` (`tests/test_debug_reverse.py`: bit-identical state after back and forward)
+* **Implementation Target**: `src/pio2/debug/snapshots.py`
 
 ### `[SPEC-DBG-07]` Stimulus
 * **Requirement**: input pins come from a list of sources: constant, toggle by hand, square wave,
   UART 8N1 bytes at a baud rate, DShot ESC reply (eRPM telemetry), I2C slave (ACK/data), replay of a
   recorded capture. TX FIFO pushes and RX FIFO pulls by hand or from a script.
+* **Verified by**: `host-tests` (`tests/test_debug_stimulus.py`)
+* **Implementation Target**: `src/pio2/debug/stimulus.py`
 
 ### `[SPEC-DBG-08]` Second Model (Diff Mode)
 * **Requirement**: optionally run the same program and stimulus on an independent reference emulator
   and stop at the first cycle where pins, PC, X/Y, ISR/OSR or FIFO levels differ, showing both. The
   reference is an external package used through a thin adapter (license checked before use).
+* **Verified by**: `host-tests` (`tests/test_debug_diff.py`: seeded divergence found)
+* **Implementation Target**: `src/pio2/debug/diff.py`
 
 ### `[SPEC-DBG-09]` Headless, Scriptable, Testable
 * **Requirement**: `pio2.debug.Session` is the one engine behind GUI, CLI and tests. `pio2-debug` runs a
@@ -110,12 +126,16 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 * **Requirement**: the debugger has its own tests (pytest): every conformance program stepped by
   instruction gives the same final state as the cocotb run; reverse step returns bit-identical state;
   a 100,000-cycle run keeps memory bounded.
+* **Verified by**: `host-tests` (`tests/test_debug_cli.py`, golden traces)
+* **Implementation Target**: `src/pio2/debug/session.py`, `src/pio2/debug/cli.py`
 
 ### `[SPEC-DBG-10]` GUI Layout
 * **Requirement**: dockable ImGui windows: Source (pio listing, PC markers per SM, breakpoint gutter),
   State machines (the `[SPEC-DBG-02]` fields), FIFOs, Pins / Logic analyzer, Timeline, Stimulus,
   Controls (step clock / step instr / run / back / reset, cycle counter), Console (Python).
   The layout is saved per project.
+* **Verified by**: `host-tests` (GUI smoke test: every window opens with a loaded session)
+* **Implementation Target**: `src/pio2/gui/`
 
 ### `[SPEC-DBG-11]` Example Sessions That Ship With the Debugger
 * **Requirement**: the debugger opens ready-made sessions (program + pin map + stimulus + what to look
@@ -136,15 +156,19 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
      SM instructions that produced it.
 * **Requirement (TLP view)**: frames on `m_tlp_*` / `s_tlp_*` are shown as a list with decoded
   fields and a cycle stamp; clicking one moves the cursor to that cycle.
+* **Verified by**: `host-tests` (`tests/test_examples_sessions.py`: every example session runs headless)
+* **Implementation Target**: `src/pio2/examples/sessions/`
 
 ### `[SPEC-DBG-12]` One Host Driver for Simulation and Board
-* **Requirement**: the debugger controls the IP through the pio2 host link (`docs/interconnect.md`:
+* **Requirement**: the debugger controls the IP through the pio2 host link (`docs/INTERCONNECT_SPECIFICATION.md`:
   frames, channels, NIC registers), using the same Python host driver a board host uses. Back ends:
   `sim-pins` (the driver clocks the SPI pins of the Verilator model, bit for bit), `sim-direct`
   (channels and registers called directly, for speed; same results), and `board` (Tang Nano 9K /
   20K over a real SPI master). A session runs unchanged on any of them; `sim-*` add the internal
   state of `[SPEC-DBG-02]`.
 * **Requirement**: no TLP in pio2. AbstractX's TLP path is tested in AbstractX.
+* **Verified by**: `host-tests` (same session on sim-pins and sim-direct gives the same trace), `board-bringup` (board back end)
+* **Implementation Target**: `src/pio2/host/driver.py`, `src/pio2/debug/backends/`
 
 ### `[SPEC-DBG-13]` Traces Are barectf / CTF 1.8 With the AbstractX Schema
 * **Requirement**: the debugger writes and reads CTF 1.8 traces using AbstractX's barectf schema
@@ -153,12 +177,16 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
   event types added to that schema, not in a private format.
 * **Requirement**: a simulation trace and a board trace of the same session open in AbstractX Studio
   and babeltrace2 and can be compared event by event.
+* **Verified by**: `host-tests` (trace opens in babeltrace2; events match the session)
+* **Implementation Target**: `src/pio2/trace/barectf_config.yaml`, `src/pio2/trace/ctf.py`
 
 ### `[SPEC-DBG-14]` Example Boards: Tang Nano 9K and Tang Nano 20K
 * **Requirement**: `docs/boards.md` gives, per board, the AbstractX build command
   (`make -f hw/Makefile tang9k` / `tang_nano20k`), the pins the PIO tile drives (from the board's
   constraint file), how to load an example program, and how to attach the debugger's `board`
   back end. pio2 does not hold board tops or constraints; AbstractX does.
+* **Verified by**: `fpga-fit`, `board-bringup`
+* **Implementation Target**: `docs/boards.md`
 
 ### `[SPEC-DBG-15]` Parts Canvas, Wokwi Style (imgui-bundle)
 * **Goal**: the feel of <https://wokwi.com/pi-pico>, a board with parts you wire up and watch, but
@@ -177,6 +205,8 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
   running and while stepping.
 * **Requirement**: example sessions (`[SPEC-DBG-11]`) ship with their diagram (blink -> LED, uart_tx ->
   terminal, ws2812 -> strip, dshot_bidir -> ESC + motor, IMU auto-DMA -> IMU + logic analyzer).
+* **Verified by**: `host-tests` (`tests/test_parts.py`: each part model against its protocol)
+* **Implementation Target**: `src/pio2/gui/canvas.py`, `src/pio2/parts/`
 
 ## 5. Milestones
 

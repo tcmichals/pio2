@@ -16,6 +16,7 @@ gui = ["imgui-bundle>=1.92"]
 pio2-programs = "pio2.programs:main"
 pio2-examples = "pio2.examples:main"
 pio2-setup-tools = "pio2.setup_tools:main"
+pio2-cocotb = "pio2.run_cocotb:main"
 
 [dependency-groups]
 dev = ["cocotb>=2.0", "pytest>=8"]

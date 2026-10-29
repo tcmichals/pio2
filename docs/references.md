@@ -24,7 +24,7 @@ Linked, not copied: the documents stay with their owners.
 * imgui-bundle (Dear ImGui, ImPlot, for Python): <https://pthom.github.io/imgui_bundle/>
 * uv: <https://docs.astral.sh/uv/>
 
-## Other PIO simulators and debuggers (prior art, see debugger.md)
+## Other PIO simulators and debuggers (prior art, see DEBUGGER_SPECIFICATION.md)
 
 Listed to compare against; check each project's current state and license before reusing anything.
 

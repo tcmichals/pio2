@@ -1,6 +1,6 @@
 # Example Boards: Tang Nano 9K and Tang Nano 20K
 
-`[SPEC-DBG-14]` in [debugger.md](debugger.md). The board tops, pin constraints and the bitstream build
+`[SPEC-DBG-14]` in [DEBUGGER_SPECIFICATION.md](DEBUGGER_SPECIFICATION.md). The board tops, pin constraints and the bitstream build
 live in [AbstractX](https://github.com/tcmichals/AbstractX), which contains pio2 as `rtl/pio`.
 
 | Board | FPGA | AbstractX top | Constraints | Build (in AbstractX) |

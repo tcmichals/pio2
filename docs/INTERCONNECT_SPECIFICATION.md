@@ -1,7 +1,7 @@
 # pio2 Interconnect: Host Link (SPI / Dual-SPI), Channels, Wishbone, DMA, Trace
 
 Status: specification, nothing implemented yet (2026-10-29). Requirements carry tags; code that
-implements one carries `@impl [SPEC-xxx-nn] docs/interconnect.md`.
+implements one carries `@impl [SPEC-xxx-nn] docs/INTERCONNECT_SPECIFICATION.md`.
 
 ## 1. Idea
 
@@ -41,6 +41,7 @@ its own wrapper, `[SPEC-ICN-09]`).
   address. No `rty`.
 * **Verified by**: cocotb bus checker on every port (flags any B4 rule violation), randomized
   `stall` / `ack` timing; SymbiYosys properties for master and slave compliance.
+* **Implementation Target**: `src/rtl/wb/`, `tests/cocotb/wb_checker.py`
 
 ### `[SPEC-WB-02]` Interconnect: Arbiter and Address Decoder
 * **Requirement**: masters: the link's register master (channel 0) and the DMA engine. Slaves: PIO
@@ -57,6 +58,8 @@ its own wrapper, `[SPEC-ICN-09]`).
   | `0x2000` | event FIFO / trace registers |
   | `0x3000` | link registers (version, channel status, interrupt mask, error counters) |
   | `0x1_0000` | ring-buffer RAM (size per build, default 16 KB) |
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_wb_interconnect_cocotb.py`: fairness, bounded bursts, err on unmapped), `formal-check`
+* **Implementation Target**: `src/rtl/wb/pio2_wb_interconnect.sv`
 
 ## 3. Host link
 
@@ -71,6 +74,8 @@ its own wrapper, `[SPEC-ICN-09]`).
   SCK must be at most f_sys / 4. The tested limit per board is recorded in `docs/boards.md`.
 * **Requirement**: pins as separate `_i`, `_o`, `_oe` signals at the IP boundary; tristate only in
   the board top (the same rule the PIO pins follow).
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_phy_cocotb.py`: single and dual, at f_sys/4), `board-bringup` (SCK limit per board)
+* **Implementation Target**: `src/rtl/link/pio2_spi_phy.sv`
 
 ### `[SPEC-LINK-02]` Frames: At Most 128 Bytes, CRC32, Like a NIC
 * **Requirement**: the link carries **frames** of at most 128 bytes, framed by CS_n. A framer on each
@@ -101,6 +106,8 @@ its own wrapper, `[SPEC-ICN-09]`).
   writes one frame (command), the FPGA queues the reply frame, the host reads it in a later CS_n
   window (signalled by `INT_n` or by polling `STATUS`). Host-to-FPGA and FPGA-to-host frames use
   separate queues, so the host can write the next command while a reply is waiting.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_framer_cocotb.py`: CRC32 known vectors, bad CRC dropped whole, 128-byte limit), `host-tests` (driver framing)
+* **Implementation Target**: `src/rtl/link/pio2_link_framer.sv`, `src/pio2/host/frame.py`
 
 ### `[SPEC-LINK-07]` NIC-Style Register Model
 * **Requirement**: the link block is controlled like a small NIC, through registers in the link
@@ -119,6 +126,8 @@ its own wrapper, `[SPEC-ICN-09]`).
 
 * **Requirement (frame buffers)**: at least two frame buffers per direction (128 bytes each) so the
   host can stream back to back; buffer count is a build parameter and is reported in `CTRL`.
+* **Verified by**: `cocotb-regression` (register map read/write, counters saturate and clear)
+* **Implementation Target**: `src/rtl/link/pio2_link_regs.sv`
 
 ### `[SPEC-LINK-03]` Channels Are Ports
 * **Requirement**: channel numbers (frame `chan`): channel 0 = registers (addressed); channel 1 = trace stream (out, `[SPEC-TRC-*]`);
@@ -126,11 +135,15 @@ its own wrapper, `[SPEC-ICN-09]`).
   configuration. Unused channels answer with an error status.
 * **Requirement**: a stream channel never needs an address: like a socket, the host only says "give me
   up to N words" or "take these N words".
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_channels_cocotb.py`)
+* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`
 
 ### `[SPEC-LINK-04]` Flow Control by Credits
 * **Requirement**: the `STATUS` reply returns, per channel, words available (out) or words free (in). The host
   never sends more than the free count; the FPGA never returns more than it has. Neither side can
   overflow the other; an attempted overflow is a counted error, not data loss.
+* **Verified by**: `cocotb-regression` (credits never exceeded; overflow counted, no data loss)
+* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`, `src/pio2/host/driver.py`
 
 ### `[SPEC-LINK-05]` Interrupt Pin and Status
 * **Requirement**: `INT_n` (active low, level) = any bit of (`ISR` and `IMR`) (`[SPEC-LINK-07]`):
@@ -138,11 +151,15 @@ its own wrapper, `[SPEC-ICN-09]`).
   `STREAM_THR` free, a DMA channel done or in error, a link error, trace dropped. The host reads `ISR`
   (in the first byte of any window, or with `STATUS`), services the causes, and writes 1 to clear
   them; a cause that is still true sets its bit again, so no interrupt is lost.
+* **Verified by**: `cocotb-regression` (every ISR cause sets INT_n; W1C; a still-true cause re-asserts)
+* **Implementation Target**: `src/rtl/link/pio2_link_regs.sv`
 
 ### `[SPEC-LINK-06]` The Same Link in Simulation
-* **Requirement**: the simulator (`docs/debugger.md`) can drive the link at the SPI pins (bit for bit
+* **Requirement**: the simulator (`docs/DEBUGGER_SPECIFICATION.md`) can drive the link at the SPI pins (bit for bit
   what a host does) or call the channels directly (fast). Both go through the same Python host
   driver, so a host program tested against the simulator runs unchanged on a board.
+* **Verified by**: `host-tests` (`tests/test_host_driver.py`: same results through pins and direct)
+* **Implementation Target**: `src/pio2/host/driver.py`
 
 ## 4. DMA
 
@@ -157,6 +174,8 @@ its own wrapper, `[SPEC-ICN-09]`).
 * **Requirement (counters)**: per channel: words moved, underruns (TX FIFO wanted data, ring empty),
   overruns (RX FIFO had data, ring full), each counted and each producing a trace event. A DMA channel
   never blocks the bus beyond `MAX_BURST` beats.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_dma_cocotb.py`: each mode, DREQ pacing, underrun/overrun counted, 1000-block steady state)
+* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`
 
 ### `[SPEC-DMA-02]` Rings Connect DMA and Link Streams
 * **Requirement**: each stream channel's ring is one producer / one consumer (link side and DMA side),
@@ -165,6 +184,8 @@ its own wrapper, `[SPEC-ICN-09]`).
 * **Requirement (examples it must carry)**: DShot / bidirectional DShot frames out on a RING channel;
   ESC serial bytes in both directions; IMU auto-DMA: DRDY triggers a PIO SPI burst, a TRIGGERED RX
   channel moves each sample block into a ring, the host collects batches on interrupt.
+* **Verified by**: `cocotb-regression` (DShot ring out, ESC serial both ways, IMU triggered burst in, end to end)
+* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`, `src/rtl/dma/pio2_ring_ram.sv`
 
 ## 5. Trace (barectf)
 
@@ -179,12 +200,16 @@ its own wrapper, `[SPEC-ICN-09]`).
   DMA burst begin / done / underrun / overrun, trigger, link frame error, dropped. Per-instruction
   events exist in simulation only (`[SPEC-DBG-13]`): at full speed they would fill the FIFO.
 * **Requirement (enable)**: a type mask register; tracing off costs no bandwidth.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_event_fifo_cocotb.py`: priority, drop-and-count, DROPPED record)
+* **Implementation Target**: `src/rtl/trace/pio2_event_fifo.sv`
 
 ### `[SPEC-TRC-02]` Records Become barectf CTF on the Host
 * **Requirement**: channel 1 streams the records; the host driver converts them into CTF 1.8 packets
   with a barectf schema (`src/pio2/trace/barectf_config.yaml`, aligned with AbstractX's
   `pio_event`), so simulation and board traces are the same and open in babeltrace2, Trace Compass
   and AbstractX Studio.
+* **Verified by**: `host-tests` (records -> CTF, read back with babeltrace2)
+* **Implementation Target**: `src/pio2/trace/ctf.py`, `src/pio2/trace/barectf_config.yaml`
 
 ## 6. Integration and tests
 
@@ -192,6 +217,38 @@ its own wrapper, `[SPEC-ICN-09]`).
 * **Requirement**: the pio2 tile exposes Wishbone (+ FIFO data requests and the event port) only. The
   TLP ingress/egress adapters move out of `asp_pio_tile` into an AbstractX-side wrapper, which keeps
   AbstractX's AXI-Stream / TLP router working unchanged; its TLP-path test moves with it.
+* **Verified by**: `cocotb-regression` (pio2 tile has no TLP ports; AbstractX wrapper passes AbstractX's TLP-path test)
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`
+
+### `[SPEC-ICN-11]` Host Adapters: SPI Link for Tang, AXI for Zynq
+* **Requirement**: the core (Wishbone interconnect, DMA engine, rings, event FIFO, PIO tile) is the
+  same on every board; only the host adapter changes:
+  * **SPI link** (`[SPEC-LINK-*]`): boards where an external CPU talks over SPI / Dual-SPI (Tang Nano
+    9K / 20K with a Pico, an SBC or the Cubie).
+  * **AXI** (Zynq-7000, where the ARM cores reach the fabric over AXI): an **AXI4-Lite to Wishbone
+    bridge** for registers (one Wishbone master in place of the link's channel-0 master), and
+    **AXI-Stream ports on the DMA rings** (one in and one out per stream channel), so the Zynq PS
+    moves bulk data with its AXI DMA or HP ports instead of SPI frames. Trace records leave on an
+    AXI-Stream port the same way. The interrupt is a PL-to-PS IRQ line with the same `ISR` / `IMR`.
+* **Requirement**: AXI exists only in these adapters, at the edge; nothing inside the core is AXI. The
+  host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap for AXI4-Lite,
+  a DMA buffer for the streams) with the same channel API.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_wb_cocotb.py`: AXI4-Lite protocol
+  checker and Wishbone checker on the two sides; `tests/cocotb/test_axis_ring_cocotb.py`: back-pressure,
+  `tlast` per block), `board-bringup` (Zynq)
+* **Implementation Target**: `src/rtl/host/pio2_axil_wb.sv`, `src/rtl/host/pio2_axis_ring.sv`, `src/pio2/host/zynq.py`
+
+### `[SPEC-ICN-12]` On the Tang Boards the PIO Replaces the Hardwired Cores
+* **Goal (project owner, 2026-10-29)**: DShot, bidirectional DShot, ESC serial passthrough and UART are
+  PIO programs on the Tang Nano 9K / 20K, not dedicated RTL. The AbstractX cores they replace
+  (`asp_dshot_core`, `asp_uart_core`, the ESC passthrough path, `asp_pwm_decoder`) are not part of the
+  pio2 Tang tops.
+* **Requirement**: each replaced function has a PIO program in `src/programs/` with a cocotb timing test
+  against the protocol (as `dshot_bidir` and `esc_serial` have today) and a board test, and the pins
+  it uses are owned by the PIO through the pin mux (`[SPEC-PIO-09]`).
+* **Verified by**: `cocotb-regression` (per program), `fpga-fit` (the Tang tops fit without the old
+  cores), `board-bringup` (motor and ESC on a Tang)
+* **Implementation Target**: `src/programs/`, `boards/tang_nano9k/`, `boards/tang_nano20k/`
 
 ### `[SPEC-ICN-10]` Verification
 * **Requirement**: per block a cocotb test with the bus checker and randomized timing, and a
@@ -199,3 +256,5 @@ its own wrapper, `[SPEC-ICN-09]`).
   end-to-end test with the Python host driver speaking single and dual SPI to the whole IP, running
   the three `[SPEC-DMA-02]` examples; every test shown to fail on a deliberately broken block.
 * **Requirement**: resource use (LUT / FF / BRAM) on Tang Nano 9K and 20K recorded per change.
+* **Verified by**: `cocotb-regression`, `formal-check`, `fpga-fit`
+* **Implementation Target**: `tests/cocotb/`, `tests/formal/`
