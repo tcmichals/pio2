@@ -25,10 +25,15 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
 * **pio2 is the simulation home of the PIO.** Every way of running a PIO program without silicon
   lives here: the RTL on Verilator (primary, also the debugger's engine), the same RTL on Icarus
   through cocotb, and independent software reference emulators for comparison (diff mode).
-* **Same protocol for simulation and hardware.** The IDE / debugger talks to the tile the way host
-  software does in AbstractX: 64-byte TLP frames (AbstractX `include/asp_tlp64.h`, Python codec
-  `tools/abstractx_wire.py`) for configuration, program load, FIFO data and the auto-DMA stream.
-  A simulated tile and a tile on an FPGA board are two back ends behind one interface.
+* **One host link, like a small NIC** ([`docs/interconnect.md`](docs/interconnect.md)): SPI or
+  Dual-SPI with an interrupt pin, carrying frames of at most 128 bytes with CRC32, NIC-style
+  registers (`ISR` / `IMR`, frame queues, error counters), and numbered channels: channel 0 for
+  addressed register access, the others as streams. Inside the FPGA everything is Wishbone B4
+  (classic for registers, pipelined bursts for streaming); a DMA engine paced by the PIO FIFOs moves
+  data between ring buffers and the state machines. No AXI, no TLP in pio2 (AbstractX adds its TLP
+  adapters around the tile in its own wrapper).
+* **Same protocol for simulation and hardware.** The IDE / debugger drives the simulated IP through the
+  same host driver as a board (at the SPI pins bit for bit, or straight to the channels for speed).
 * **Tracing is barectf / CTF 1.8**, with AbstractX's schema (`trace/barectf_config.yaml`, which already
   has `pio_event`: tile, SM, event type, PC, duration, next to `tlp_push` / `tlp_pop`). Simulation
   traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
@@ -49,12 +54,12 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
 ```
           .pio  ──pioasm──►  image
                                │
-   IDE / debugger (Python, imgui-bundle) ── TLP64 (AbstractX wire format) ──┐
+   IDE / debugger (Python, imgui-bundle) ── host link: SPI frames, channels ─┐
         │                                                                   │
         │ barectf CTF traces (AbstractX schema)                 ┌───────────┴───────────┐
         ▼                                                       │                       │
    AbstractX Studio / babeltrace2                    Verilator model of        Tang Nano 9K / 20K
-                                                     src/rtl (simulation)      (AbstractX bitstream)
+                                                     src/rtl (simulation)      (Wishbone + DMA + link)
 ```
 
 ## Quick start
@@ -123,6 +128,7 @@ uv run pio2-setup-tools --check
 * [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md): requirements (`[SPEC-PIO-*]`), RP2040 parity checklist
 * [`docs/architecture.md`](docs/architecture.md): block diagram, register map, ports
 * [`docs/debugger.md`](docs/debugger.md): visual single-step debugger and parts canvas design
+* [`docs/interconnect.md`](docs/interconnect.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, Wishbone, DMA, barectf trace
 * [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)
 * [`docs/references.md`](docs/references.md): links to the Raspberry Pi datasheets and tools (not copied here)
 * [`docs/provenance.md`](docs/provenance.md): where every file came from

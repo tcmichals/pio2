@@ -137,18 +137,14 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 * **Requirement (TLP view)**: frames on `m_tlp_*` / `s_tlp_*` are shown as a list with decoded
   fields and a cycle stamp; clicking one moves the cursor to that cycle.
 
-### `[SPEC-DBG-12]` One Control Protocol: AbstractX TLP64, Simulation and Board Back Ends
-* **Requirement**: the debugger configures and feeds the tile only through 64-byte TLP frames in the
-  AbstractX wire format (`include/asp_tlp64.h`; Python codec `tools/abstractx_wire.py` in AbstractX):
-  program load, SM configuration, FIFO data, and the auto-DMA stream back. The Wishbone port is
-  used only where AbstractX host software uses it too.
-* **Requirement**: two back ends behind one `Backend` interface: `sim` (Verilator model, the
-  default; full internal state per `[SPEC-DBG-02]`) and `board` (Tang Nano 9K / 20K running the
-  AbstractX bitstream, over the AbstractX host transport; pins, FIFOs and TLPs only, no internal
-  state). A session written against `sim` runs unchanged on `board`.
-* **Open point**: how pio2 gets the wire codec without copying it (AbstractX includes pio2 as a
-  submodule, so pio2 cannot include AbstractX back): a small shared package, or the format
-  defined in pio2 and AbstractX importing it. Decide before M1 code depends on it.
+### `[SPEC-DBG-12]` One Host Driver for Simulation and Board
+* **Requirement**: the debugger controls the IP through the pio2 host link (`docs/interconnect.md`:
+  frames, channels, NIC registers), using the same Python host driver a board host uses. Back ends:
+  `sim-pins` (the driver clocks the SPI pins of the Verilator model, bit for bit), `sim-direct`
+  (channels and registers called directly, for speed; same results), and `board` (Tang Nano 9K /
+  20K over a real SPI master). A session runs unchanged on any of them; `sim-*` add the internal
+  state of `[SPEC-DBG-02]`.
+* **Requirement**: no TLP in pio2. AbstractX's TLP path is tested in AbstractX.
 
 ### `[SPEC-DBG-13]` Traces Are barectf / CTF 1.8 With the AbstractX Schema
 * **Requirement**: the debugger writes and reads CTF 1.8 traces using AbstractX's barectf schema
