@@ -1,0 +1,28 @@
+[project]
+name = "pio2"
+version = "0.1.0"
+description = "RP2040/RP2350-ISA PIO block in SystemVerilog, its program library, and a visual single-step debugger (Verilator + imgui-bundle)"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "src/programs/examples/pico/LICENSE.TXT"]
+authors = [{ name = "Tim Michals", email = "tcmichals@gmail.com" }]
+requires-python = ">=3.11,<3.14"
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["imgui-bundle>=1.92"]
+
+[project.scripts]
+pio2-programs = "pio2.programs:main"
+pio2-examples = "pio2.examples:main"
+pio2-setup-tools = "pio2.setup_tools:main"
+
+[dependency-groups]
+dev = ["cocotb>=2.0", "pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pio2"]
