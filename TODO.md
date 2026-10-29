@@ -19,12 +19,12 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 ## Next
 
 1. [ ] Interconnect RTL, in order, each with formal + UVM-style cocotb + coverage ([SPEC-VER-01]):
-   1. [x] Verification base: uv deps (cocotbext-axi, pyuvm, cocotb-coverage) done; [ ] ZipCPU property
-      files (`pio2-setup-tools --zipcpu-props`, needs a run with network), [ ] first formal .sby
+   1. [x] Verification base: uv deps (cocotbext-axi, pyuvm, cocotb-coverage); ZipCPU property files from
+      the `third_party/wb2axip` submodule; [ ] first formal .sby (tile AXI4-Lite port with faxil_slave)
    2. [x] Tile register port Wishbone -> AXI4-Lite ([SPEC-AXI-04]); all tile suites through cocotbext-axi
       (43 tests); front-end suite with stalls, orders, SLVERR, exactly-once; two mutants caught
-   2b. [ ] Reuse ([SPEC-AXI-05]): Forencich verilog-axi / verilog-axis and ZipCPU wb2axip as pinned
-      `third_party/` submodules
+   2b. [x] Reuse ([SPEC-AXI-05]): Forencich verilog-axi / verilog-axis and ZipCPU wb2axip as pinned
+      `third_party/` submodules; licenses checked and recorded (`docs/third_party.md`, `LICENSES/`)
    2c. [ ] AbstractX: wrapper with ZipCPU `wbm2axilite` in front of the tile before moving its
       `rtl/pio` pointer past this change (AbstractX still instantiates the Wishbone port)
    3. [ ] Tile: TLP adapters out (AbstractX wrapper with its WB->AXI4-Lite bridge), AXI-Stream FIFO

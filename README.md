@@ -74,7 +74,8 @@ Python is managed with [uv](https://docs.astral.sh/uv/). The simulator (Verilato
 not a Python package; see [Tools](#tools).
 
 ```bash
-uv sync                      # Python 3.12 venv with cocotb + pytest (dev group)
+git clone --recurse-submodules https://github.com/tcmichals/pio2.git   # or: git submodule update --init
+uv sync                      # Python 3.12 venv with cocotb, cocotbext-axi, pyuvm, cocotb-coverage, pytest
 uv sync --extra gui          # also imgui-bundle, for the debugger
 uv run pio2-programs --list  # programs and their sizes
 uv run pio2-programs --check # images match pioasm (needs pioasm, else exits 2: "not checked")
@@ -141,11 +142,19 @@ Rules for contributors and agents: [`AGENTS.md`](AGENTS.md) (AbstractX SpecTrace
 * [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md): visual single-step debugger and parts canvas design
 * [`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, AXI4-Lite / AXI-Stream, DMA, barectf trace, verification
 * [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)
+* [`docs/third_party.md`](docs/third_party.md): reused projects, licenses, pinned commits, compliance
 * [`docs/references.md`](docs/references.md): links to the Raspberry Pi datasheets and tools (not copied here)
 * [`docs/provenance.md`](docs/provenance.md): where every file came from
 
 ## License
 
-GPL-3.0-or-later (`LICENSE`). The programs under `src/programs/examples/pico/` are Raspberry Pi
-pico-examples under BSD-3-Clause (their own `LICENSE.TXT`). No Raspberry Pi documentation is copied
-into this repository; `docs/references.md` links to it.
+GPL-3.0-or-later (`LICENSE`). Reused projects, their links, authors, pinned commits and how pio2
+meets each license are listed in [`docs/third_party.md`](docs/third_party.md):
+
+* [alexforencich/verilog-axi](https://github.com/alexforencich/verilog-axi) and
+  [verilog-axis](https://github.com/alexforencich/verilog-axis) (Alex Forencich, MIT), submodules
+* [ZipCPU/wb2axip](https://github.com/ZipCPU/wb2axip) (Dan Gisselquist / [ZipCPU](https://github.com/ZipCPU),
+  Apache-2.0, text in `LICENSES/Apache-2.0.txt`), submodule
+* Raspberry Pi pico-examples programs in `src/programs/examples/pico/` (BSD-3-Clause, own `LICENSE.TXT`)
+
+No Raspberry Pi documentation is copied into this repository; `docs/references.md` links to it.

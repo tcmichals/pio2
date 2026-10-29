@@ -13,7 +13,7 @@ description: "Check skill. Bus protocol compliance proved, not sampled: every AX
 
 ```bash
 export PATH="$HOME/.tools/oss-cad-suite/bin:$PATH"
-uv run pio2-setup-tools --zipcpu-props   # ZipCPU wb2axip property files at a pinned commit
+git submodule update --init              # third_party/wb2axip: ZipCPU property files (pinned)
 sby -f tests/formal/<block>.sby           # one .sby per block: faxil_slave / faxis_* bound to its ports
 ```
 

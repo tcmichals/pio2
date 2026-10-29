@@ -86,13 +86,15 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
   * ZipCPU (Dan Gisselquist), `wb2axip` (<https://github.com/ZipCPU/wb2axip>, Apache-2.0): the formal
     property files (`[SPEC-VER-01]`) and bridges such as `wbm2axilite` (used by AbstractX's wrapper,
     `[SPEC-ICN-09]`).
-* **Requirement**: each is a git submodule under `third_party/` at a pinned commit, with its license
-  file; pio2 code instantiates them and does not copy or edit them. Our own checks (formal properties,
+* **Requirement**: each is a git submodule under `third_party/` at a pinned commit, listed in
+  `docs/third_party.md` with its link, author, license and what pio2 uses it for; pio2 instantiates
+  them and does not copy or edit them. License obligations (MIT notice; Apache-2.0 license text, no
+  modification, NOTICE if present) are met as that file describes, and re-checked when a pin moves. Our own checks (formal properties,
   cocotbext-axi tests, coverage) run on every place we integrate one, so reuse never means untested.
 * **Requirement**: pio2 writes only what is specific to it: the PIO tile, the SPI PHY and framer, the
   channel mux, the DMA engine, the event FIFO.
 * **Verified by**: `cocotb-regression` (each integrated block under our tests), `formal-check`
-* **Implementation Target**: `third_party/`, `src/rtl/`
+* **Implementation Target**: `third_party/`, `docs/third_party.md`, `LICENSES/`, `src/rtl/`
 
 ### `[SPEC-AXI-04]` The PIO Tile's Register Port Is AXI4-Lite
 * **Requirement**: `asp_pio_tile`'s register port is an AXI4-Lite slave (`[SPEC-AXI-01]`) with the same
@@ -313,8 +315,8 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 * **Goal (project owner, 2026-10-29)**: full validation of every bus port and block, not only directed
   tests.
 * **Requirement (formal)**: every AXI4-Lite and AXI-Stream port carries the ZipCPU formal property
-  sets (Dan Gisselquist, `wb2axip`: `faxil_slave`, `faxil_master`, `faxis_master`, `faxis_slave`; used
-  under their license, fetched at a pinned commit by `pio2-setup-tools`, license file kept) and is
+  sets (Dan Gisselquist, `wb2axip`: `faxil_slave`, `faxil_master`, `faxis_master`, `faxis_slave`; from
+  the `third_party/wb2axip` submodule at its pinned commit, Apache-2.0, `docs/third_party.md`) and is
   proved with SymbiYosys: bounded model check to a stated depth and k-induction where it closes; the
   async FIFO pointers and the CRC32 framer have their own properties. Every proof is shown to fail on
   a deliberately broken copy of the block.

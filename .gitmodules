@@ -1,0 +1,9 @@
+[submodule "third_party/verilog-axi"]
+	path = third_party/verilog-axi
+	url = https://github.com/alexforencich/verilog-axi.git
+[submodule "third_party/verilog-axis"]
+	path = third_party/verilog-axis
+	url = https://github.com/alexforencich/verilog-axis.git
+[submodule "third_party/wb2axip"]
+	path = third_party/wb2axip
+	url = https://github.com/ZipCPU/wb2axip.git

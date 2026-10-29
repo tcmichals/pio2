@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "RP2040/RP2350-ISA PIO block in SystemVerilog, its program library, and a visual single-step debugger (Verilator + imgui-bundle)"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-license-files = ["LICENSE", "src/programs/examples/pico/LICENSE.TXT"]
+license-files = ["LICENSE", "LICENSES/*", "src/programs/examples/pico/LICENSE.TXT"]
 authors = [{ name = "Tim Michals", email = "tcmichals@gmail.com" }]
 requires-python = ">=3.11,<3.14"
 dependencies = []
