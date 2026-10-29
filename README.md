@@ -20,6 +20,43 @@ machine's registers, FIFOs, clock divider phase, stall reason and pins visible.
 This project started as `rtl/pio` inside [AbstractX](https://github.com/tcmichals/AbstractX), which
 uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
 
+## Direction
+
+* **pio2 is the simulation home of the PIO.** Every way of running a PIO program without silicon
+  lives here: the RTL on Verilator (primary, also the debugger's engine), the same RTL on Icarus
+  through cocotb, and independent software reference emulators for comparison (diff mode).
+* **Same protocol for simulation and hardware.** The IDE / debugger talks to the tile the way host
+  software does in AbstractX: 64-byte TLP frames (AbstractX `include/asp_tlp64.h`, Python codec
+  `tools/abstractx_wire.py`) for configuration, program load, FIFO data and the auto-DMA stream.
+  A simulated tile and a tile on an FPGA board are two back ends behind one interface.
+* **Tracing is barectf / CTF 1.8**, with AbstractX's schema (`trace/barectf_config.yaml`, which already
+  has `pio_event`: tile, SM, event type, PC, duration, next to `tlp_push` / `tlp_pop`). Simulation
+  traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
+  simulated run can be compared with a board run event by event.
+* **Example boards: Tang Nano 9K and Tang Nano 20K** (Gowin, open-source flow). The board tops,
+  pin constraints and bitstream build stay in AbstractX (`hw/tang9k/`, `hw/tang_nano20k/`,
+  `make -f hw/Makefile tang9k|tang_nano20k`); pio2 documents how to run its example programs on
+  them and connect the debugger.
+* **A Wokwi-style simulator** (like <https://wokwi.com/pi-pico>), built with imgui-bundle: a parts
+  canvas with the tile's pins wired to LEDs, buttons, a UART terminal, a WS2812 strip, an ESC with a
+  motor model, an SPI IMU, a logic analyzer; plus the debugger views (per-SM registers, FIFOs,
+  clock divider, timeline) and single step by clock or instruction, forward and back. Unlike
+  software-model simulators it runs the real RTL. See [`docs/debugger.md`](docs/debugger.md).
+* **Examples** that ship as debugger sessions: Raspberry Pi pico-examples, Wokwi Pi Pico projects
+  as a behaviour reference, Betaflight's PIO programs, our DShot / ESC serial programs, and the
+  IMU auto-DMA path (DRDY -> SPI burst -> TLP frames). Details: [`docs/debugger.md`](docs/debugger.md).
+
+```
+          .pio  ──pioasm──►  image
+                               │
+   IDE / debugger (Python, imgui-bundle) ── TLP64 (AbstractX wire format) ──┐
+        │                                                                   │
+        │ barectf CTF traces (AbstractX schema)                 ┌───────────┴───────────┐
+        ▼                                                       │                       │
+   AbstractX Studio / babeltrace2                    Verilator model of        Tang Nano 9K / 20K
+                                                     src/rtl (simulation)      (AbstractX bitstream)
+```
+
 ## Quick start
 
 Python is managed with [uv](https://docs.astral.sh/uv/). The simulator (Verilator, or Icarus) is
@@ -85,7 +122,8 @@ uv run pio2-setup-tools --check
 
 * [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md): requirements (`[SPEC-PIO-*]`), RP2040 parity checklist
 * [`docs/architecture.md`](docs/architecture.md): block diagram, register map, ports
-* [`docs/debugger.md`](docs/debugger.md): visual single-step debugger design
+* [`docs/debugger.md`](docs/debugger.md): visual single-step debugger and parts canvas design
+* [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)
 * [`docs/references.md`](docs/references.md): links to the Raspberry Pi datasheets and tools (not copied here)
 * [`docs/provenance.md`](docs/provenance.md): where every file came from
 

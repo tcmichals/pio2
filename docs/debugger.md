@@ -137,14 +137,60 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 * **Requirement (TLP view)**: frames on `m_tlp_*` / `s_tlp_*` are shown as a list with decoded
   fields and a cycle stamp; clicking one moves the cursor to that cycle.
 
+### `[SPEC-DBG-12]` One Control Protocol: AbstractX TLP64, Simulation and Board Back Ends
+* **Requirement**: the debugger configures and feeds the tile only through 64-byte TLP frames in the
+  AbstractX wire format (`include/asp_tlp64.h`; Python codec `tools/abstractx_wire.py` in AbstractX):
+  program load, SM configuration, FIFO data, and the auto-DMA stream back. The Wishbone port is
+  used only where AbstractX host software uses it too.
+* **Requirement**: two back ends behind one `Backend` interface: `sim` (Verilator model, the
+  default; full internal state per `[SPEC-DBG-02]`) and `board` (Tang Nano 9K / 20K running the
+  AbstractX bitstream, over the AbstractX host transport; pins, FIFOs and TLPs only, no internal
+  state). A session written against `sim` runs unchanged on `board`.
+* **Open point**: how pio2 gets the wire codec without copying it (AbstractX includes pio2 as a
+  submodule, so pio2 cannot include AbstractX back): a small shared package, or the format
+  defined in pio2 and AbstractX importing it. Decide before M1 code depends on it.
+
+### `[SPEC-DBG-13]` Traces Are barectf / CTF 1.8 With the AbstractX Schema
+* **Requirement**: the debugger writes and reads CTF 1.8 traces using AbstractX's barectf schema
+  (`trace/barectf_config.yaml`): `pio_event` (tile, SM, event type, PC, duration) per SM event,
+  `tlp_push` / `tlp_pop` per TLP. Extra simulation-only detail (per-cycle registers) goes in new
+  event types added to that schema, not in a private format.
+* **Requirement**: a simulation trace and a board trace of the same session open in AbstractX Studio
+  and babeltrace2 and can be compared event by event.
+
+### `[SPEC-DBG-14]` Example Boards: Tang Nano 9K and Tang Nano 20K
+* **Requirement**: `docs/boards.md` gives, per board, the AbstractX build command
+  (`make -f hw/Makefile tang9k` / `tang_nano20k`), the pins the PIO tile drives (from the board's
+  constraint file), how to load an example program, and how to attach the debugger's `board`
+  back end. pio2 does not hold board tops or constraints; AbstractX does.
+
+### `[SPEC-DBG-15]` Parts Canvas, Wokwi Style (imgui-bundle)
+* **Goal**: the feel of <https://wokwi.com/pi-pico>, a board with parts you wire up and watch, but
+  running the PIO RTL, with every cycle inspectable.
+* **Requirement**: a canvas window (imgui-bundle: ImGui draw lists / imgui-node-editor) shows the tile
+  as a part with its 32 GPIO pins, and virtual parts connected to pins by wires:
+  LED, push button / switch, logic-analyzer probe, UART terminal (TX/RX at a baud rate), WS2812
+  strip, ESC + motor model (DShot / bidirectional DShot reply, serial passthrough), SPI IMU with DRDY
+  (register image, for the auto-DMA session), I2C sensor, quadrature encoder, square-wave source.
+* **Requirement**: the wiring and part settings are a diagram file (`*.diagram.json`, pio2's own
+  format: parts, pin connections, attributes), saved with the session. The same diagram drives the
+  headless run (`[SPEC-DBG-09]`), so a canvas setup is also a regression test.
+* **Requirement**: parts are simulation models in Python behind one `Part` interface (`on_cycle`:
+  read the pins the tile drives, drive its own inputs); they record into the trace (`[SPEC-DBG-13]`)
+  like any other event. Live indicators (LED on, terminal text, motor RPM, strip colours) update while
+  running and while stepping.
+* **Requirement**: example sessions (`[SPEC-DBG-11]`) ship with their diagram (blink -> LED, uart_tx ->
+  terminal, ws2812 -> strip, dshot_bidir -> ESC + motor, IMU auto-DMA -> IMU + logic analyzer).
+
 ## 5. Milestones
 
 | M | Content | Done when |
 | :--- | :--- | :--- |
 | M0 | split from AbstractX: RTL, programs, tests, uv project | cocotb 39/39 in this repo (done 2026-10-29) |
-| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session`; CLI step/run | pytest: conformance programs stepped by clock match cocotb |
-| M2 | GUI: controls, source, SM state, FIFOs | load blink/uart_tx, step, see PC/registers change |
+| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session` (sim back end, TLP64 control); CLI step/run | pytest: conformance programs stepped by clock match cocotb |
+| M2 | GUI: controls, source, SM state, FIFOs; parts canvas with LED, button, terminal ([SPEC-DBG-15]) | blink drives an LED, uart_tx prints in the terminal, while stepping |
 | M3 | logic analyzer, timeline, FST/JSON export | DShot frame measured between cursors |
 | M4 | breakpoints/watchpoints, reverse step | reverse-step test bit-identical |
 | M5 | stimulus generators, example sessions ([SPEC-DBG-11]) | ESC serial, DShot reply and the IMU auto-DMA session run from the GUI and headless |
 | M6 | diff mode against a reference emulator | first divergence shown on a seeded bug |
+| M7 | barectf CTF traces ([SPEC-DBG-13]); `board` back end on Tang Nano 9K / 20K ([SPEC-DBG-12], [SPEC-DBG-14]) | same session on sim and board, traces compared in AbstractX Studio |
