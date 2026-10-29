@@ -29,14 +29,24 @@ module asp_pio_tile #(
     output logic [31:0]  o_gpio_out,
     output logic [31:0]  o_gpio_pindir,
 
-    // Wishbone B4 Slave Bus Interface (Base: 0x40000700)
-    input  wire          wb_cyc_i,
-    input  wire          wb_stb_i,
-    input  wire          wb_we_i,
-    input  wire [31:0]   wb_adr_i,
-    input  wire [31:0]   wb_dat_i,
-    output logic [31:0]  wb_dat_o,
-    output logic         wb_ack_o,
+    // AXI4-Lite register slave ([SPEC-AXI-04]); same register map as the former Wishbone port
+    input  wire  [31:0]  s_axil_awaddr,
+    input  wire          s_axil_awvalid,
+    output logic         s_axil_awready,
+    input  wire  [31:0]  s_axil_wdata,
+    input  wire  [3:0]   s_axil_wstrb,
+    input  wire          s_axil_wvalid,
+    output logic         s_axil_wready,
+    output logic [1:0]   s_axil_bresp,
+    output logic         s_axil_bvalid,
+    input  wire          s_axil_bready,
+    input  wire  [31:0]  s_axil_araddr,
+    input  wire          s_axil_arvalid,
+    output logic         s_axil_arready,
+    output logic [31:0]  s_axil_rdata,
+    output logic [1:0]   s_axil_rresp,
+    output logic         s_axil_rvalid,
+    input  wire          s_axil_rready,
 
     // Ingress 512-bit TLPs from asp_router.sv ([SPEC-PIO-10])
     input  wire [511:0]  s_tlp_tdata,
@@ -51,6 +61,75 @@ module asp_pio_tile #(
     // Hardware Tile Interrupt Request to CPU
     output logic         o_pio_irq
 );
+
+    // ------------------------------------------------------------------------
+    // AXI4-Lite front end ([SPEC-AXI-04]). It turns each AXI4-Lite transaction into exactly one
+    // request on the internal register port below (the former Wishbone slave logic, unchanged:
+    // wb_* are now internal signals). One request at a time; reads and writes alternate when both
+    // wait; a new request is taken only once the previous response has been accepted.
+    // ------------------------------------------------------------------------
+    // @impl [SPEC-AXI-04] docs/INTERCONNECT_SPECIFICATION.md
+    logic        wb_cyc_i, wb_stb_i, wb_we_i;
+    logic [31:0] wb_adr_i, wb_dat_i;
+    logic [31:0] wb_dat_o;
+    logic        wb_ack_o;
+
+    logic        aw_held, w_held, ar_held;
+    logic [31:0] aw_addr, w_data, ar_addr;
+    logic [3:0]  w_strb;
+    logic        req_busy, req_is_write, prefer_read;
+
+    assign s_axil_awready = !aw_held;
+    assign s_axil_wready  = !w_held;
+    assign s_axil_arready = !ar_held;
+    assign wb_cyc_i = req_busy;
+    assign wb_stb_i = req_busy;
+
+    wire write_ready = aw_held && w_held && !s_axil_bvalid;
+    wire read_ready  = ar_held && !s_axil_rvalid;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            aw_held <= 1'b0; w_held <= 1'b0; ar_held <= 1'b0;
+            aw_addr <= 32'd0; w_data <= 32'd0; w_strb <= 4'd0; ar_addr <= 32'd0;
+            req_busy <= 1'b0; req_is_write <= 1'b0; prefer_read <= 1'b0;
+            wb_we_i <= 1'b0; wb_adr_i <= 32'd0; wb_dat_i <= 32'd0;
+            s_axil_bvalid <= 1'b0; s_axil_bresp <= 2'b00;
+            s_axil_rvalid <= 1'b0; s_axil_rresp <= 2'b00; s_axil_rdata <= 32'd0;
+        end else begin
+            if (s_axil_awvalid && s_axil_awready) begin aw_held <= 1'b1; aw_addr <= s_axil_awaddr; end
+            if (s_axil_wvalid && s_axil_wready) begin w_held <= 1'b1; w_data <= s_axil_wdata; w_strb <= s_axil_wstrb; end
+            if (s_axil_arvalid && s_axil_arready) begin ar_held <= 1'b1; ar_addr <= s_axil_araddr; end
+            if (s_axil_bvalid && s_axil_bready) s_axil_bvalid <= 1'b0;
+            if (s_axil_rvalid && s_axil_rready) s_axil_rvalid <= 1'b0;
+
+            if (req_busy) begin
+                if (wb_ack_o) begin                     // the register block answered
+                    req_busy <= 1'b0;
+                    if (req_is_write) begin
+                        aw_held <= 1'b0; w_held <= 1'b0;
+                        s_axil_bresp <= 2'b00; s_axil_bvalid <= 1'b1;
+                    end else begin
+                        ar_held <= 1'b0;
+                        s_axil_rdata <= wb_dat_o; s_axil_rresp <= 2'b00; s_axil_rvalid <= 1'b1;
+                    end
+                end
+            end else if (write_ready && (!read_ready || !prefer_read)) begin
+                prefer_read <= 1'b1;
+                if (w_strb != 4'hF) begin               // partial write: no effect, SLVERR
+                    aw_held <= 1'b0; w_held <= 1'b0;
+                    s_axil_bresp <= 2'b10; s_axil_bvalid <= 1'b1;
+                end else begin
+                    req_busy <= 1'b1; req_is_write <= 1'b1;
+                    wb_we_i <= 1'b1; wb_adr_i <= aw_addr; wb_dat_i <= w_data;
+                end
+            end else if (read_ready) begin
+                prefer_read <= 1'b0;
+                req_busy <= 1'b1; req_is_write <= 1'b0;
+                wb_we_i <= 1'b0; wb_adr_i <= ar_addr;
+            end
+        end
+    end
 
     // ------------------------------------------------------------------------
     // Shared Dual-Port Instruction Memory (32 Words x 16-Bit)
@@ -287,7 +366,7 @@ module asp_pio_tile #(
     );
 
     // ------------------------------------------------------------------------
-    // Wishbone B4 Slave Bus Interface (Base: 0x40000700)
+    // Internal register port (the former Wishbone B4 slave logic; driven by the AXI4-Lite front end)
     // ------------------------------------------------------------------------
     /* verilator lint_off UNUSEDSIGNAL */
     wire _unused_addr = |wb_adr_i[31:12];

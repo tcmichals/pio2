@@ -22,3 +22,22 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   45 requirements, 0 broken, 0 drift, 0 unbacked `@verifies`, 6 skills, 0 skill problems.
 * **Not verified**: `pio2-programs --check` (pioasm not installed here); no board run; no evidence
   ledger yet (`Complete 0/45`: most requirements are spec only).
+
+## 2026-10-29: Tile register port moved from Wishbone to AXI4-Lite
+
+* **Category**: `process-gap` (bus change), `false-alarm` (one test timing)
+* **What**: `asp_pio_tile` now has an AXI4-Lite slave port ([SPEC-AXI-04]): a front end turns each
+  transaction into exactly one request on the existing register logic (unchanged), reads and writes
+  alternate, a new request waits for the previous response, partial `WSTRB` answers `SLVERR`. All tile
+  tests use cocotbext-axi's `AxiLiteMaster` (`reg_write` / `reg_read`).
+* **Found**: `test_tlp_packetizer_and_trace_stream` started watching the TLP output only after the
+  trigger write returned; with AXI4-Lite the write returns a few clocks later and the trace packet had
+  already gone by. The test now collects from before the trigger (the RTL was right).
+* **New suite** `test_asp_pio_axil_cocotb.py`: 1000 random accesses with random stalls on all five
+  channels against a model; AW/W in any order; SLVERR on a partial write with no change; exactly-once
+  side effects (SM0 echoes 4 TX words into RX, read back in order, RX empty; 200 rounds). Shown to fail
+  on two mutants: partial writes applied (1 test fails) and a read re-issued after its answer (all 4
+  fail; the 20 ms test timeout turns the resulting hang into a failure).
+* **Also**: `pio2-cocotb --timeout` (default 900 s per suite) so a hung suite fails instead of blocking.
+* **Not verified**: formal on the port (ZipCPU properties not fetched yet); AbstractX does not build
+  against this tile until its wrapper adds a Wishbone-to-AXI4-Lite bridge.

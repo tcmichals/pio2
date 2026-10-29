@@ -78,11 +78,32 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
   two masters at once), `formal-check`
 * **Implementation Target**: `src/rtl/axi/pio2_axil_xbar.sv`
 
+### `[SPEC-AXI-05]` Reuse Proven AXI Building Blocks
+* **Requirement**: generic AXI blocks are reused, not rewritten, from:
+  * Alex Forencich, `verilog-axi` and `verilog-axis` (<https://github.com/alexforencich>, MIT):
+    AXI4-Lite crossbar / interconnect, AXI-Stream FIFOs (synchronous and asynchronous), arbiters and
+    muxes, register slices;
+  * ZipCPU (Dan Gisselquist), `wb2axip` (<https://github.com/ZipCPU/wb2axip>, Apache-2.0): the formal
+    property files (`[SPEC-VER-01]`) and bridges such as `wbm2axilite` (used by AbstractX's wrapper,
+    `[SPEC-ICN-09]`).
+* **Requirement**: each is a git submodule under `third_party/` at a pinned commit, with its license
+  file; pio2 code instantiates them and does not copy or edit them. Our own checks (formal properties,
+  cocotbext-axi tests, coverage) run on every place we integrate one, so reuse never means untested.
+* **Requirement**: pio2 writes only what is specific to it: the PIO tile, the SPI PHY and framer, the
+  channel mux, the DMA engine, the event FIFO.
+* **Verified by**: `cocotb-regression` (each integrated block under our tests), `formal-check`
+* **Implementation Target**: `third_party/`, `src/rtl/`
+
 ### `[SPEC-AXI-04]` The PIO Tile's Register Port Is AXI4-Lite
 * **Requirement**: `asp_pio_tile`'s register port is an AXI4-Lite slave (`[SPEC-AXI-01]`) with the same
   register map as before (CTRL, FSTAT, FDEBUG, IRQ, SMx_*, TXFx / RXFx, INSTR_MEM). Its Wishbone port is
   removed; pio2 contains no Wishbone. AbstractX connects its Wishbone master through a Wishbone to
   AXI4-Lite bridge in its own wrapper (`[SPEC-ICN-09]`).
+* **Requirement (front end)**: write address and write data are accepted in either order or together;
+  one register access reaches the register block at a time (reads and writes alternate when both
+  wait); the next request is accepted only after the previous response was taken, so a register with
+  a side effect (TX FIFO write, RX FIFO read, SMx_INSTR) acts exactly once per transaction. Registers
+  are whole 32-bit words: a write with `WSTRB` other than `4'hF` changes nothing and answers `SLVERR`.
 * **Requirement**: the move keeps behaviour: every existing tile test (tile, conformance, DShot, ESC
   serial) passes through the AXI4-Lite port, driven by cocotbext-axi, before and after.
 * **Verified by**: `cocotb-regression` (all tile suites through the AXI4-Lite port), `formal-check`

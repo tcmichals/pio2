@@ -46,6 +46,7 @@ def main():
     ap.add_argument("--only", default="", help="run suites whose name contains this text")
     ap.add_argument("--sim", default="verilator")
     ap.add_argument("--keep", action="store_true", help="keep the build directory and print it")
+    ap.add_argument("--timeout", type=int, default=900, help="seconds per suite before it counts as hung")
     a = ap.parse_args()
     names = suites(a.only)
     if not names:
@@ -63,8 +64,13 @@ def main():
             shutil.rmtree(cwd / "sim_build", ignore_errors=True)
             top = re.search(r"^# cocotb-toplevel:\s*(\S+)", (cwd / f"{name}.py").read_text(), re.M)
             cmd = ["make", f"MODULE={name}"] + ([f"TOPLEVEL={top.group(1)}"] if top else [])
-            proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
-            out = proc.stdout + proc.stderr
+            try:
+                proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=a.timeout)
+                out = proc.stdout + proc.stderr
+            except subprocess.TimeoutExpired as e:
+                out = ((e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+                out += f"\nsuite hung: no result after {a.timeout} s"
+                proc = subprocess.CompletedProcess(cmd, 124, out, "")
             m = None
             for m in SUMMARY.finditer(out):
                 pass

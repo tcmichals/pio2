@@ -18,7 +18,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, Timer
 from cocotb.utils import get_sim_time
 
-from test_asp_pio_cocotb import (wb_write, wb_read, REG_CTRL, IRAM_BASE, SM_CLKDIV,
+from test_asp_pio_cocotb import (axil_setup, reg_write, reg_read, REG_CTRL, IRAM_BASE, SM_CLKDIV,
                                  SM_EXECCTRL, SM_SHIFTCTRL, SM_PINCTRL, SM_TXF, SM_RXF)
 
 from pio2.programs import load_program
@@ -63,8 +63,7 @@ async def setup(dut, hz):
     dut.rst_n.value = 0
     dut.i_sys_timestamp.value = 0
     dut.i_gpio.value = 1 << PIN
-    for sig in ("wb_cyc_i", "wb_stb_i", "wb_we_i", "wb_adr_i", "wb_dat_i"):
-        getattr(dut, sig).value = 0
+    axil_setup(dut)
     dut.m_tlp_tready.value = 1
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
@@ -74,18 +73,18 @@ async def setup(dut, hz):
 
     p = load_program("dshot_bidir")
     for i, w in enumerate(p["instructions"]):
-        await wb_write(dut, IRAM_BASE + 4 * i, w)
+        await reg_write(dut, IRAM_BASE + 4 * i, w)
     div = hz / SM_HZ                                       # host computes this from the board clock
     div_int, div_frac = int(div), int(round((div - int(div)) * 256))
     if div_frac == 256:
         div_int, div_frac = div_int + 1, 0
-    await wb_write(dut, SM_CLKDIV(0), (div_int << 16) | (div_frac << 8))
-    await wb_write(dut, SM_EXECCTRL(0), (PIN << 24) | (p["wrap"] << 12) | (p["wrap_target"] << 7))
-    await wb_write(dut, SM_SHIFTCTRL(0), 1 << 16)          # autopush at 32, shift left
-    await wb_write(dut, SM_PINCTRL(0), (PIN << 15) | (1 << 26) | (PIN << 5) | (1 << 20) | PIN)
-    await wb_write(dut, REG_CTRL, 1 << 4)                  # restart
-    await wb_write(dut, SM_INSTR(0), 0x0000)               # jmp 0
-    await wb_write(dut, REG_CTRL, 1)
+    await reg_write(dut, SM_CLKDIV(0), (div_int << 16) | (div_frac << 8))
+    await reg_write(dut, SM_EXECCTRL(0), (PIN << 24) | (p["wrap"] << 12) | (p["wrap_target"] << 7))
+    await reg_write(dut, SM_SHIFTCTRL(0), 1 << 16)          # autopush at 32, shift left
+    await reg_write(dut, SM_PINCTRL(0), (PIN << 15) | (1 << 26) | (PIN << 5) | (1 << 20) | PIN)
+    await reg_write(dut, REG_CTRL, 1 << 4)                  # restart
+    await reg_write(dut, SM_INSTR(0), 0x0000)               # jmp 0
+    await reg_write(dut, REG_CTRL, 1)
     return pad, period_ps / 1000
 
 
@@ -123,8 +122,8 @@ async def read_rx(dut, n, timeout_us=200):
     words = []
     t_end = get_sim_time("ns") + timeout_us * 1000
     while len(words) < n and get_sim_time("ns") < t_end:
-        if not (await wb_read(dut, REG_FIFO_STAT) >> 28) & 1:
-            words.append(await wb_read(dut, SM_RXF(0)))
+        if not (await reg_read(dut, REG_FIFO_STAT) >> 28) & 1:
+            words.append(await reg_read(dut, SM_RXF(0)))
         else:
             await Timer(1000, unit="ns")
     return words
@@ -132,7 +131,7 @@ async def read_rx(dut, n, timeout_us=200):
 
 async def one_cycle(dut, pad, clk_ns, value, period_us, bit_scale=1.0):
     frame = dshot_ref.dshot_frame(value, telemetry=False, bidir=True)
-    await wb_write(dut, SM_TXF(0), frame)
+    await reg_write(dut, SM_TXF(0), frame)
     bits = await capture_frame(dut, pad, clk_ns)
     assert bits == frame, f"frame 0x{bits:04X} != 0x{frame:04X}"
     payload = dshot_ref.erpm_payload(period_us)
@@ -170,10 +169,10 @@ async def test_no_reply_gives_two_zero_words(dut):
     """An ESC that does not answer: two 0 words, then the next frame goes out normally."""
     pad, clk_ns = await setup(dut, 27_000_000)
     frame = dshot_ref.dshot_frame(100)
-    await wb_write(dut, SM_TXF(0), frame)
+    await reg_write(dut, SM_TXF(0), frame)
     assert await capture_frame(dut, pad, clk_ns) == frame
     assert await read_rx(dut, 2) == [0, 0]
-    await wb_write(dut, SM_TXF(0), frame)
+    await reg_write(dut, SM_TXF(0), frame)
     assert await capture_frame(dut, pad, clk_ns) == frame
 
 

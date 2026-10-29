@@ -16,6 +16,7 @@ Verifies:
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, Timer
+from cocotbext.axi import AxiLiteBus, AxiLiteMaster
 
 PIO_BASE = 0x40000700
 
@@ -72,38 +73,29 @@ def PIO_SET(dest=0, data=0, delay=0):
     return (0b111 << 13) | (delay << 8) | ((dest & 7) << 5) | (data & 0x1F)
 
 
-async def wb_write(dut, offset, value):
-    """Write a 32-bit word via Wishbone B4."""
-    dut.wb_adr_i.value = PIO_BASE + offset
-    dut.wb_dat_i.value = value
-    dut.wb_we_i.value = 1
-    dut.wb_cyc_i.value = 1
-    dut.wb_stb_i.value = 1
-    await RisingEdge(dut.clk)
-    await Timer(1, unit="ns")
-    assert int(dut.wb_ack_o.value) == 1, f"No ack on write to offset 0x{offset:03X}"
-    dut.wb_cyc_i.value = 0
-    dut.wb_stb_i.value = 0
-    dut.wb_we_i.value = 0
-    await RisingEdge(dut.clk)
-    await Timer(1, unit="ns")
+# Register access through the tile's AXI4-Lite port ([SPEC-AXI-04]), driven by cocotbext-axi.
+_axil = None
 
 
-async def wb_read(dut, offset):
-    """Read a 32-bit word via Wishbone B4."""
-    dut.wb_adr_i.value = PIO_BASE + offset
-    dut.wb_we_i.value = 0
-    dut.wb_cyc_i.value = 1
-    dut.wb_stb_i.value = 1
-    await RisingEdge(dut.clk)
-    await Timer(1, unit="ns")
-    assert int(dut.wb_ack_o.value) == 1, f"No ack on read from offset 0x{offset:03X}"
-    val = int(dut.wb_dat_o.value)
-    dut.wb_cyc_i.value = 0
-    dut.wb_stb_i.value = 0
-    await RisingEdge(dut.clk)
-    await Timer(1, unit="ns")
-    return val
+def axil_setup(dut):
+    """New AXI4-Lite master for this test (call once the clock runs, before reset release)."""
+    global _axil
+    _axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axil"), dut.clk, dut.rst_n,
+                          reset_active_level=False)
+    return _axil
+
+
+async def reg_write(dut, offset, value):
+    """Write a 32-bit register (AXI4-Lite; asserts an OKAY response)."""
+    resp = await _axil.write(PIO_BASE + offset, int(value).to_bytes(4, "little"))
+    assert resp.resp == 0, f"write 0x{offset:03X}: response {resp.resp}"
+
+
+async def reg_read(dut, offset):
+    """Read a 32-bit register (AXI4-Lite; asserts an OKAY response)."""
+    resp = await _axil.read(PIO_BASE + offset, 4)
+    assert resp.resp == 0, f"read 0x{offset:03X}: response {resp.resp}"
+    return int.from_bytes(resp.data, "little")
 
 
 async def init_tile(dut):
@@ -112,11 +104,7 @@ async def init_tile(dut):
     dut.rst_n.value = 0
     dut.i_sys_timestamp.value = 0
     dut.i_gpio.value = 0
-    dut.wb_cyc_i.value = 0
-    dut.wb_stb_i.value = 0
-    dut.wb_we_i.value = 0
-    dut.wb_adr_i.value = 0
-    dut.wb_dat_i.value = 0
+    axil_setup(dut)
     dut.m_tlp_tready.value = 1
     dut.s_tlp_tvalid.value = 0
     dut.s_tlp_tdata.value = 0
@@ -132,28 +120,28 @@ async def test_wishbone_iram_and_registers(dut):
     await init_tile(dut)
 
     # 1. Verify default reset state
-    ctrl = await wb_read(dut, REG_CTRL)
+    ctrl = await reg_read(dut, REG_CTRL)
     assert ctrl == 0, f"Expected REG_CTRL == 0, got 0x{ctrl:08X}"
 
-    irq = await wb_read(dut, REG_IRQ)
+    irq = await reg_read(dut, REG_IRQ)
     assert irq == 0, f"Expected REG_IRQ == 0, got 0x{irq:08X}"
 
     # 2. Write and read back all 32 words in IRAM
     test_instructions = [(i * 0x0505 + 0xA5) & 0xFFFF for i in range(32)]
     for i in range(32):
-        await wb_write(dut, IRAM_BASE + i * 4, test_instructions[i])
+        await reg_write(dut, IRAM_BASE + i * 4, test_instructions[i])
 
     for i in range(32):
-        readback = await wb_read(dut, IRAM_BASE + i * 4)
+        readback = await reg_read(dut, IRAM_BASE + i * 4)
         assert readback == test_instructions[i], f"IRAM[{i}]: expected 0x{test_instructions[i]:04X}, got 0x{readback:04X}"
 
     # 3. Configure SM0 clock divider and control registers
-    await wb_write(dut, SM_CLKDIV(0), (2 << 16))  # Div = 2.0
-    clkdiv0 = await wb_read(dut, SM_CLKDIV(0))
+    await reg_write(dut, SM_CLKDIV(0), (2 << 16))  # Div = 2.0
+    clkdiv0 = await reg_read(dut, SM_CLKDIV(0))
     assert clkdiv0 == (2 << 16), f"SM0 CLKDIV expected 0x20000 (RP2040 INT[31:16]), got 0x{clkdiv0:X}"
 
-    await wb_write(dut, SM_EXECCTRL(0), (31 << 12) | (0 << 7))  # Wrap top 31, bottom 0
-    execctrl0 = await wb_read(dut, SM_EXECCTRL(0))
+    await reg_write(dut, SM_EXECCTRL(0), (31 << 12) | (0 << 7))  # Wrap top 31, bottom 0
+    execctrl0 = await reg_read(dut, SM_EXECCTRL(0))
     assert execctrl0 == ((31 << 12) | (0 << 7)), f"SM0 EXECCTRL mismatch: 0x{execctrl0:X}"
 
 
@@ -174,17 +162,17 @@ async def test_sm_gpio_set_and_jmp(dut):
         PIO_JMP(cond=0, addr=1)
     ]
     for i, inst in enumerate(prog):
-        await wb_write(dut, IRAM_BASE + i * 4, inst)
+        await reg_write(dut, IRAM_BASE + i * 4, inst)
 
     # PINCTRL for SM0: set_base = 0, set_count = 5
-    await wb_write(dut, SM_PINCTRL(0), (5 << 26) | (0 << 10))
+    await reg_write(dut, SM_PINCTRL(0), (5 << 26) | (0 << 10))
     # Clock divider = 1.0 (full speed)
-    await wb_write(dut, SM_CLKDIV(0), (1 << 16))
+    await reg_write(dut, SM_CLKDIV(0), (1 << 16))
     # Wrap config: wrap_top = 31, wrap_bottom = 0
-    await wb_write(dut, SM_EXECCTRL(0), (31 << 12) | (0 << 7))
+    await reg_write(dut, SM_EXECCTRL(0), (31 << 12) | (0 << 7))
 
     # Enable SM0
-    await wb_write(dut, REG_CTRL, 0x01)
+    await reg_write(dut, REG_CTRL, 0x01)
     await ClockCycles(dut.clk, 3)
 
     # Check that PINDIRS for pins 0..4 are driven high
@@ -201,7 +189,7 @@ async def test_sm_gpio_set_and_jmp(dut):
     assert 0x0A in pins_seen, f"0x0A pattern not observed: seen {pins_seen}"
 
     # Disable SM0
-    await wb_write(dut, REG_CTRL, 0x00)
+    await reg_write(dut, REG_CTRL, 0x00)
 
 
 @cocotb.test()
@@ -221,19 +209,19 @@ async def test_tx_fifo_pull_and_out(dut):
         PIO_JMP(cond=0, addr=1)
     ]
     for i, inst in enumerate(prog):
-        await wb_write(dut, IRAM_BASE + i * 4, inst)
+        await reg_write(dut, IRAM_BASE + i * 4, inst)
 
     # PINCTRL: out_base = 0, out_count = 8, set_base = 0, set_count = 5
-    await wb_write(dut, SM_PINCTRL(0), (8 << 20) | (5 << 26) | 0)
-    await wb_write(dut, SM_SHIFTCTRL(0), (1 << 19))  # Shift right (LSB first)
-    await wb_write(dut, SM_CLKDIV(0), (1 << 16))
+    await reg_write(dut, SM_PINCTRL(0), (8 << 20) | (5 << 26) | 0)
+    await reg_write(dut, SM_SHIFTCTRL(0), (1 << 19))  # Shift right (LSB first)
+    await reg_write(dut, SM_CLKDIV(0), (1 << 16))
 
     # Enable SM0
-    await wb_write(dut, REG_CTRL, 0x01)
+    await reg_write(dut, REG_CTRL, 0x01)
     await ClockCycles(dut.clk, 5)
 
     # Write test byte 0x5A to TX FIFO via Wishbone
-    await wb_write(dut, SM_TXF(0), 0x5A)
+    await reg_write(dut, SM_TXF(0), 0x5A)
 
     # Wait for SM to execute PULL and OUT
     out_val = 0
@@ -245,7 +233,7 @@ async def test_tx_fifo_pull_and_out(dut):
     assert out_val == 0x5A, f"Expected 0x5A on GPIO, got 0x{out_val:02X}"
 
     # Write next test byte 0xC3 to TX FIFO
-    await wb_write(dut, SM_TXF(0), 0xC3)
+    await reg_write(dut, SM_TXF(0), 0xC3)
     for _ in range(20):
         await RisingEdge(dut.clk)
         out_val = int(dut.o_gpio_out.value) & 0xFF
@@ -254,7 +242,7 @@ async def test_tx_fifo_pull_and_out(dut):
     assert out_val == 0xC3, f"Expected 0xC3 on GPIO, got 0x{out_val:02X}"
 
     # Disable SM0
-    await wb_write(dut, REG_CTRL, 0x00)
+    await reg_write(dut, REG_CTRL, 0x00)
 
 
 @cocotb.test()
@@ -292,29 +280,29 @@ async def test_supervisor_worker_irq_chaining(dut):
     ]
 
     for i, inst in enumerate(prog_sm0):
-        await wb_write(dut, IRAM_BASE + (0 + i) * 4, inst)
+        await reg_write(dut, IRAM_BASE + (0 + i) * 4, inst)
 
     for i, inst in enumerate(prog_sm1):
-        await wb_write(dut, IRAM_BASE + (8 + i) * 4, inst)
+        await reg_write(dut, IRAM_BASE + (8 + i) * 4, inst)
 
     # Configure SM0 PINCTRL & EXECCTRL
-    await wb_write(dut, SM_PINCTRL(0), (2 << 26) | 0)
-    await wb_write(dut, SM_EXECCTRL(0), (3 << 12) | (0 << 7))  # Wrap 0..3
-    await wb_write(dut, SM_CLKDIV(0), (1 << 16))
+    await reg_write(dut, SM_PINCTRL(0), (2 << 26) | 0)
+    await reg_write(dut, SM_EXECCTRL(0), (3 << 12) | (0 << 7))  # Wrap 0..3
+    await reg_write(dut, SM_CLKDIV(0), (1 << 16))
 
     # Configure SM1 PINCTRL & EXECCTRL (start at PC = 8, wrap 8..13)
-    await wb_write(dut, SM_PINCTRL(1), (2 << 26) | 0)
-    await wb_write(dut, SM_EXECCTRL(1), (13 << 12) | (8 << 7))  # Wrap 8..13
-    await wb_write(dut, SM_CLKDIV(1), (1 << 16))
+    await reg_write(dut, SM_PINCTRL(1), (2 << 26) | 0)
+    await reg_write(dut, SM_EXECCTRL(1), (13 << 12) | (8 << 7))  # Wrap 8..13
+    await reg_write(dut, SM_CLKDIV(1), (1 << 16))
 
     # Start SM1 at PC = 8 the way pio_sm_init does: restart, then an SMx_INSTR `jmp 8`
     # (a restart keeps the PC, [SPEC-PIO-02] rule 7)
-    await wb_write(dut, REG_CTRL, 0x02 << 4)
-    await wb_write(dut, 0x100 + 0x20 * 1 + 0x18, PIO_JMP(cond=0, addr=8))
+    await reg_write(dut, REG_CTRL, 0x02 << 4)
+    await reg_write(dut, 0x100 + 0x20 * 1 + 0x18, PIO_JMP(cond=0, addr=8))
     await ClockCycles(dut.clk, 2)
 
     # Now enable both SM0 and SM1
-    await wb_write(dut, REG_CTRL, 0x03)
+    await reg_write(dut, REG_CTRL, 0x03)
 
     # Watch the flags every clock: `wait 1 irq` clears a flag the clock it fires, so a flag
     # lives 1-2 clocks and bus reads every few clocks can miss it
@@ -329,7 +317,7 @@ async def test_supervisor_worker_irq_chaining(dut):
     assert rounds >= 5, f"supervisor completed only {rounds} rounds in 200 clocks"
 
     # Disable both
-    await wb_write(dut, REG_CTRL, 0x00)
+    await reg_write(dut, REG_CTRL, 0x00)
 
 
 @cocotb.test()
@@ -340,10 +328,10 @@ async def test_tlp_packetizer_and_trace_stream(dut):
     # 1. OUT_CFG ([SPEC-PIO-10]): EN[0], MASK[7:4] = SM1, TAG[15:8] = 5, CHANNEL[23:16] = 2,
     #    BURST_WORDS[27:24] = 4, TRACE_EN[31]
     tlp_cfg_word = 1 | (0x2 << 4) | (5 << 8) | (2 << 16) | (4 << 24) | (1 << 31)
-    await wb_write(dut, REG_TLP_CFG, tlp_cfg_word)
+    await reg_write(dut, REG_TLP_CFG, tlp_cfg_word)
 
     # Verify readback
-    cfg_rb = await wb_read(dut, REG_TLP_CFG)
+    cfg_rb = await reg_read(dut, REG_TLP_CFG)
     assert (cfg_rb & 1) == 1, "TLP not enabled in config"
 
     # Set mock system timestamp
@@ -380,31 +368,34 @@ async def test_tlp_packetizer_and_trace_stream(dut):
         PIO_JMP(cond=0, addr=12)
     ]
     for i, inst in enumerate(prog_tlp):
-        await wb_write(dut, IRAM_BASE + i * 4, inst)
+        await reg_write(dut, IRAM_BASE + i * 4, inst)
 
-    await wb_write(dut, SM_EXECCTRL(1), (12 << 12) | (0 << 7))
-    await wb_write(dut, SM_CLKDIV(1), (1 << 16))
+    await reg_write(dut, SM_EXECCTRL(1), (12 << 12) | (0 << 7))
+    await reg_write(dut, SM_CLKDIV(1), (1 << 16))
 
-    # Enable SM1
-    await wb_write(dut, REG_CTRL, 0x02 | (0x02 << 4))  # Enable SM1 & restart
-    await wb_write(dut, REG_CTRL, 0x02)
-    # Pulse software trigger to generate Stream 5 timeline span
-    await wb_write(dut, SM_TRIG(1), 1)
-
-    # Monitor AXI-Stream m_tlp_tdata for the emitted 64-byte TLP
+    # Monitor AXI-Stream m_tlp_tdata for the emitted 64-byte TLPs from before the SM starts: the
+    # packets come within a few clocks of the trigger, and a register write returns only after its
+    # response (AXI4-Lite takes a few clocks longer than the old Wishbone helper did).
     tlp_packets = []
     trace_packets = []
 
-    for _ in range(60):
-        await RisingEdge(dut.clk)
-        if int(dut.m_tlp_tvalid.value) == 1 and int(dut.m_tlp_tready.value) == 1:
-            raw_data = int(dut.m_tlp_tdata.value)
-            raw_bytes = raw_data.to_bytes(64, byteorder="big")
-            tlp_type = raw_bytes[0]
-            if tlp_type == 0x10:
-                tlp_packets.append(raw_bytes)
-            elif tlp_type == 0xC1:
-                trace_packets.append(raw_bytes)
+    async def collect(n):
+        for _ in range(n):
+            await RisingEdge(dut.clk)
+            if int(dut.m_tlp_tvalid.value) == 1 and int(dut.m_tlp_tready.value) == 1:
+                raw_bytes = int(dut.m_tlp_tdata.value).to_bytes(64, byteorder="big")
+                if raw_bytes[0] == 0x10:
+                    tlp_packets.append(raw_bytes)
+                elif raw_bytes[0] == 0xC1:
+                    trace_packets.append(raw_bytes)
+
+    collector = cocotb.start_soon(collect(120))
+    # Enable SM1
+    await reg_write(dut, REG_CTRL, 0x02 | (0x02 << 4))  # Enable SM1 & restart
+    await reg_write(dut, REG_CTRL, 0x02)
+    # Pulse software trigger to generate Stream 5 timeline span
+    await reg_write(dut, SM_TRIG(1), 1)
+    await collector
 
     assert len(tlp_packets) > 0, "No 64-byte TLP datagram was emitted by the TLP shim!"
     pkt = tlp_packets[0]
@@ -443,4 +434,4 @@ async def test_tlp_packetizer_and_trace_stream(dut):
     await ClockCycles(dut.clk, 2)
 
     # Disable SM1
-    await wb_write(dut, REG_CTRL, 0x00)
+    await reg_write(dut, REG_CTRL, 0x00)

@@ -16,7 +16,7 @@ import random
 import cocotb
 from cocotb.triggers import ClockCycles, FallingEdge, RisingEdge, Timer
 
-from test_asp_pio_cocotb import (wb_write, wb_read, init_tile, REG_CTRL, IRAM_BASE, SM_CLKDIV,
+from test_asp_pio_cocotb import (reg_write, reg_read, init_tile, REG_CTRL, IRAM_BASE, SM_CLKDIV,
                                  SM_EXECCTRL, SM_RXF, PIO_PULL, PIO_MOV, PIO_PUSH)
 
 REG_OUT_CFG = 0x0C
@@ -104,14 +104,14 @@ async def send_tlp(dut, tlp, gap_max=0):
 async def setup(dut, enable_sms=True):
     await init_tile(dut)
     for i, w in enumerate(ECHO):
-        await wb_write(dut, IRAM_BASE + 4 * i, w)
+        await reg_write(dut, IRAM_BASE + 4 * i, w)
     for s in range(4):
-        await wb_write(dut, SM_EXECCTRL(s), 2 << 12)
-        await wb_write(dut, SM_CLKDIV(s), 1 << 16)
-    await wb_write(dut, REG_CTRL, 0xF << 4)
-    await wb_write(dut, REG_IN_CFG, 1 | (CH_IN << 8))
+        await reg_write(dut, SM_EXECCTRL(s), 2 << 12)
+        await reg_write(dut, SM_CLKDIV(s), 1 << 16)
+    await reg_write(dut, REG_CTRL, 0xF << 4)
+    await reg_write(dut, REG_IN_CFG, 1 | (CH_IN << 8))
     if enable_sms:
-        await wb_write(dut, REG_CTRL, 0xF)
+        await reg_write(dut, REG_CTRL, 0xF)
 
 
 def out_cfg(mask, burst, tag=7, channel=CH_OUT):
@@ -136,9 +136,9 @@ async def test_four_words_one_clock(dut):
     await ClockCycles(dut.clk, 40)
     assert writes == [0xF], f"TX writes per clock: {[hex(w) for w in writes]}"
 
-    await wb_write(dut, REG_CTRL, 0xF)
+    await reg_write(dut, REG_CTRL, 0xF)
     await ClockCycles(dut.clk, 20)
-    got = [await wb_read(dut, SM_RXF(s)) for s in range(4)]
+    got = [await reg_read(dut, SM_RXF(s)) for s in range(4)]
     assert got == [0xA0, 0xA1, 0xA2, 0xA3], [hex(w) for w in got]
 
 
@@ -148,10 +148,10 @@ async def test_partial_mask_groups(dut):
     await setup(dut)
     await send_tlp(dut, make_tlp(0b1010, [1, 2, 3, 4, 5, 0xDEAD, 0xBEEF], length=5))
     await ClockCycles(dut.clk, 100)
-    sm1 = [await wb_read(dut, SM_RXF(1)) for _ in range(3)]
-    sm3 = [await wb_read(dut, SM_RXF(3)) for _ in range(2)]
+    sm1 = [await reg_read(dut, SM_RXF(1)) for _ in range(3)]
+    sm3 = [await reg_read(dut, SM_RXF(3)) for _ in range(2)]
     assert sm1 == [1, 3, 5] and sm3 == [2, 4], (sm1, sm3)
-    stat = await wb_read(dut, 0x08)
+    stat = await reg_read(dut, 0x08)
     assert (stat >> 28) == 0xF, f"RX FIFOs not empty afterwards: 0x{stat:08X}"
 
 
@@ -159,11 +159,11 @@ async def test_partial_mask_groups(dut):
 async def test_other_channel_and_disabled_ignored(dut):
     await setup(dut)
     await send_tlp(dut, make_tlp(0x1, [0x55], channel=CH_IN + 1))
-    await wb_write(dut, REG_IN_CFG, 0)
+    await reg_write(dut, REG_IN_CFG, 0)
     await send_tlp(dut, make_tlp(0x1, [0x66]))
     await send_tlp(dut, make_tlp(0x0, [0x77]))                 # empty mask: consumed, nothing written
     await ClockCycles(dut.clk, 50)
-    assert (await wb_read(dut, 0x08) >> 28) == 0xF, "a word was delivered"
+    assert (await reg_read(dut, 0x08) >> 28) == 0xF, "a word was delivered"
 
 
 @cocotb.test()
@@ -177,7 +177,7 @@ async def test_queue_full_backpressure_and_stream_order(dut):
     for t in tlps[:SLOTS]:
         await send_tlp(dut, t)
     await ClockCycles(dut.clk, 30)
-    stat = await wb_read(dut, REG_IN_STATUS)
+    stat = await reg_read(dut, REG_IN_STATUS)
     assert stat & 0x3F == SLOTS and (stat >> 8) & 1, f"IN_STATUS 0x{stat:08X}"
 
     # next TLP is held, not dropped
@@ -190,8 +190,8 @@ async def test_queue_full_backpressure_and_stream_order(dut):
     dut.s_tlp_tvalid.value = 0
 
     eg = Egress(dut, ready_prob=0.4)
-    await wb_write(dut, REG_OUT_CFG, out_cfg(0x1, 10))
-    await wb_write(dut, REG_CTRL, 0x1)
+    await reg_write(dut, REG_OUT_CFG, out_cfg(0x1, 10))
+    await reg_write(dut, REG_CTRL, 0x1)
     for t in tlps[SLOTS:]:
         await send_tlp(dut, t)
     await eg.wait_words(len(words))
@@ -201,7 +201,7 @@ async def test_queue_full_backpressure_and_stream_order(dut):
                p["addr"] == 0x40000700 for p in eg.pkts)
     assert [p["seq"] for p in eg.pkts] == list(range(len(eg.pkts)))
     assert all(p["len"] == 10 for p in eg.pkts)
-    assert (await wb_read(dut, REG_IN_STATUS)) == 0
+    assert (await reg_read(dut, REG_IN_STATUS)) == 0
 
 
 @cocotb.test()
@@ -209,7 +209,7 @@ async def test_gather_rounds_dshot_layout(dut):
     """mask 0xF, burst 8: two rounds of four in one TLP, SM order; random ingress gaps and tready."""
     await setup(dut)
     eg = Egress(dut, ready_prob=0.5)
-    await wb_write(dut, REG_OUT_CFG, out_cfg(0xF, 8))
+    await reg_write(dut, REG_OUT_CFG, out_cfg(0xF, 8))
     expect = []
     for frame in range(20):
         a = [(frame << 8) | (0x10 * s) for s in range(4)]
@@ -228,7 +228,7 @@ async def test_idle_timeout_and_timestamp(dut):
     timestamp of the clock its first word left the RX FIFO."""
     await setup(dut)
     eg = Egress(dut)
-    await wb_write(dut, REG_OUT_CFG, out_cfg(0x1, 10))
+    await reg_write(dut, REG_OUT_CFG, out_cfg(0x1, 10))
 
     async def clock_ts():
         t = 0
@@ -251,7 +251,7 @@ async def test_idle_timeout_and_timestamp(dut):
     await ClockCycles(dut.clk, 2000)
     assert eg.pkts == [], "sent before burst without a timeout"
 
-    await wb_write(dut, REG_OUT_TIMEOUT, 100)
+    await reg_write(dut, REG_OUT_TIMEOUT, 100)
     await eg.wait_words(3, 2000)
     p = eg.pkts[0]
     assert p["words"] == [7, 8, 9] and p["len"] == 3
@@ -264,10 +264,10 @@ async def test_trace_and_data_share_egress(dut):
     stays unchanged until accepted (checked by Egress) and no data word is lost."""
     await setup(dut)
     eg = Egress(dut, ready_prob=0.3)
-    await wb_write(dut, REG_OUT_CFG, out_cfg(0x1, 1) | (1 << 31))
+    await reg_write(dut, REG_OUT_CFG, out_cfg(0x1, 1) | (1 << 31))
     sent = list(range(0x200, 0x200 + 40))
     for i in range(0, len(sent), 2):
         await send_tlp(dut, make_tlp(0x1, sent[i:i + 2]), gap_max=3)
-        await wb_write(dut, 0x11C, 1)                 # SM0 trigger: trace event
+        await reg_write(dut, 0x11C, 1)                 # SM0 trigger: trace event
     await eg.wait_words(len(sent))
     assert [w for p in eg.pkts for w in p["words"]] == sent

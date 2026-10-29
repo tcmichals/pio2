@@ -14,7 +14,7 @@ from pathlib import Path
 import cocotb
 from cocotb.triggers import ClockCycles
 
-from test_asp_pio_cocotb import (init_tile, wb_write, wb_read, REG_CTRL, REG_IRQ, IRAM_BASE,
+from test_asp_pio_cocotb import (init_tile, reg_write, reg_read, REG_CTRL, REG_IRQ, IRAM_BASE,
                                  SM_CLKDIV, SM_EXECCTRL, SM_SHIFTCTRL, SM_PINCTRL, SM_TXF,
                                  SM_RXF, SM_STAT)
 
@@ -36,32 +36,32 @@ async def run(dut, name, sm=0, pinctrl=0, shiftctrl=0, execctrl=0, enable=True):
     """Load `name` at offset 0 and configure SM `sm` from the image (wrap, side-set)."""
     p = load_program(name)
     for i, w in enumerate(p["instructions"]):
-        await wb_write(dut, IRAM_BASE + 4 * i, w)
+        await reg_write(dut, IRAM_BASE + 4 * i, w)
     ss = p["sideset"]
     if ss["size"]:
         pinctrl |= ss["size"] << 29
         execctrl |= (1 << 30) if ss["optional"] else 0
         execctrl |= (1 << 29) if ss["pindirs"] else 0
     execctrl |= (p["wrap"] << 12) | (p["wrap_target"] << 7)
-    await wb_write(dut, SM_CLKDIV(sm), 1 << 16)
-    await wb_write(dut, SM_EXECCTRL(sm), execctrl)
-    await wb_write(dut, SM_SHIFTCTRL(sm), shiftctrl)
-    await wb_write(dut, SM_PINCTRL(sm), pinctrl)
-    await wb_write(dut, REG_CTRL, (1 << (sm + 4)))           # restart (disabled)
-    await wb_write(dut, SM_INSTR(sm), 0x0000)                # jmp 0, as pio_sm_exec does
+    await reg_write(dut, SM_CLKDIV(sm), 1 << 16)
+    await reg_write(dut, SM_EXECCTRL(sm), execctrl)
+    await reg_write(dut, SM_SHIFTCTRL(sm), shiftctrl)
+    await reg_write(dut, SM_PINCTRL(sm), pinctrl)
+    await reg_write(dut, REG_CTRL, (1 << (sm + 4)))           # restart (disabled)
+    await reg_write(dut, SM_INSTR(sm), 0x0000)                # jmp 0, as pio_sm_exec does
     if enable:
-        await wb_write(dut, REG_CTRL, (1 << sm))
+        await reg_write(dut, REG_CTRL, (1 << sm))
     return p
 
 
 async def rx_empty(dut, sm):
-    return (await wb_read(dut, REG_FIFO_STAT) >> (28 + sm)) & 1
+    return (await reg_read(dut, REG_FIFO_STAT) >> (28 + sm)) & 1
 
 
 async def drain(dut, sm, limit=8):
     out = []
     while len(out) < limit and not await rx_empty(dut, sm):
-        out.append(await wb_read(dut, SM_RXF(sm)))
+        out.append(await reg_read(dut, SM_RXF(sm)))
     return out
 
 
@@ -76,8 +76,8 @@ async def test_pull_block_stalls_on_empty_fifo(dut):
     await run(dut, "c_pull_block", pinctrl=SET_PIN0)
     await ClockCycles(dut.clk, 50)
     assert pin(dut, 0) == 0, "set pins,1 ran although the FIFO was empty"
-    assert await wb_read(dut, SM_STAT(0)) & 0x1F == 0, "PC advanced past the blocking pull"
-    await wb_write(dut, SM_TXF(0), 0x12345678)
+    assert await reg_read(dut, SM_STAT(0)) & 0x1F == 0, "PC advanced past the blocking pull"
+    await reg_write(dut, SM_TXF(0), 0x12345678)
     await ClockCycles(dut.clk, 20)
     assert await drain(dut, 0) == [0x12345678]
 
@@ -133,7 +133,7 @@ async def test_autopull_refill_and_stall(dut):
     await ClockCycles(dut.clk, 30)
     early = await drain(dut, 0)
     assert early == [], f"OUT ran with an empty OSR and FIFO: {early}"
-    await wb_write(dut, SM_TXF(0), 0x44332211)
+    await reg_write(dut, SM_TXF(0), 0x44332211)
     await ClockCycles(dut.clk, 60)
     got = await drain(dut, 0)
     assert got == [0x11, 0x22, 0x33, 0x44], [hex(v) for v in got]
@@ -168,8 +168,8 @@ async def test_mov_status(dut):
     await ClockCycles(dut.clk, 20)
     assert await drain(dut, 0) == [0xFFFFFFFF]
     await run(dut, "c_mov_status", execctrl=1, enable=False)
-    await wb_write(dut, SM_TXF(0), 0xAAAA)               # TX level 1: not below 1
-    await wb_write(dut, REG_CTRL, 1)
+    await reg_write(dut, SM_TXF(0), 0xAAAA)               # TX level 1: not below 1
+    await reg_write(dut, REG_CTRL, 1)
     await ClockCycles(dut.clk, 20)
     assert await drain(dut, 0) == [0]
 
@@ -179,7 +179,7 @@ async def test_sideset_opt_count_includes_enable(dut):
     """Rule 5: `.side_set 1 opt` (SIDESET_COUNT 2) drives the pin only when side-set is given."""
     await init_tile(dut)
     await run(dut, "c_sideset_opt", pinctrl=(3 << 10), enable=False)  # SIDESET_BASE=3
-    await wb_write(dut, REG_CTRL, 1)
+    await reg_write(dut, REG_CTRL, 1)
     seen = []
     for _ in range(12):
         await ClockCycles(dut.clk, 1)
@@ -195,9 +195,9 @@ async def test_irq_wait_waits_for_clear(dut):
     await init_tile(dut)
     await run(dut, "c_irq_wait", pinctrl=SET_PIN0)
     await ClockCycles(dut.clk, 40)
-    assert await wb_read(dut, REG_IRQ) & 1 == 1, "irq wait did not set the flag"
+    assert await reg_read(dut, REG_IRQ) & 1 == 1, "irq wait did not set the flag"
     assert pin(dut, 0) == 0, "irq wait did not wait"
-    await wb_write(dut, REG_IRQ, 1)                      # host clears flag 0
+    await reg_write(dut, REG_IRQ, 1)                      # host clears flag 0
     await ClockCycles(dut.clk, 20)
     assert pin(dut, 0) == 1
 
@@ -208,7 +208,7 @@ async def test_irq_rel_keeps_bit2(dut):
     await init_tile(dut)
     await run(dut, "c_irq_rel", sm=1)
     await ClockCycles(dut.clk, 20)
-    assert await wb_read(dut, REG_IRQ) & 0xFF == (1 << 5)
+    assert await reg_read(dut, REG_IRQ) & 0xFF == (1 << 5)
 
 
 @cocotb.test()
@@ -227,16 +227,16 @@ async def test_wait_gpio(dut):
 async def test_restart_keeps_pc_fifo_pins(dut):
     """Rule 7 (datasheet CTRL.SM_RESTART): PC, X, the FIFOs and the pins survive a restart."""
     await init_tile(dut)
-    await wb_write(dut, SM_PINCTRL(0), SET_PIN0)
+    await reg_write(dut, SM_PINCTRL(0), SET_PIN0)
     for ins in (0xE081, 0xE001, 0x0007, 0xE025):       # set pindirs 1; set pins 1; jmp 7; set x, 5
-        await wb_write(dut, SM_INSTR(0), ins)
-    await wb_write(dut, SM_TXF(0), 0xAB)
-    await wb_write(dut, REG_CTRL, 1 << 4)               # restart SM0
+        await reg_write(dut, SM_INSTR(0), ins)
+    await reg_write(dut, SM_TXF(0), 0xAB)
+    await reg_write(dut, REG_CTRL, 1 << 4)               # restart SM0
     await ClockCycles(dut.clk, 4)
-    assert await wb_read(dut, SM_STAT(0)) & 0x1F == 7, "restart moved the PC"
+    assert await reg_read(dut, SM_STAT(0)) & 0x1F == 7, "restart moved the PC"
     assert int(dut.o_gpio_pindir.value) & 1 == 1 and pin(dut, 0) == 1, "restart changed the pin"
     for ins in (0x8080, 0xA0C7, 0x8000, 0xA0C1, 0x8000):  # pull noblock; mov isr, osr; push; mov isr, x; push
-        await wb_write(dut, SM_INSTR(0), ins)
+        await reg_write(dut, SM_INSTR(0), ins)
     await ClockCycles(dut.clk, 2)
     assert await drain(dut, 0) == [0xAB, 5], "restart lost the TX FIFO word or X"
 
@@ -246,17 +246,17 @@ async def test_pin_latch_latest_writer_wins(dut):
     """Rule 10: one latch per pin for the tile; the latest write wins, whichever SM made it.
     (The per-SM latch let SM1, which once made pin 0 an input, keep it an input for ever.)"""
     await init_tile(dut)
-    await wb_write(dut, SM_PINCTRL(0), SET_PIN0)
-    await wb_write(dut, SM_PINCTRL(1), SET_PIN0)
-    await wb_write(dut, SM_INSTR(1), 0xE080)            # SM1: set pindirs 0
-    await wb_write(dut, SM_INSTR(0), 0xE001)            # SM0: set pins 1
-    await wb_write(dut, SM_INSTR(0), 0xE081)            # SM0: set pindirs 1
+    await reg_write(dut, SM_PINCTRL(0), SET_PIN0)
+    await reg_write(dut, SM_PINCTRL(1), SET_PIN0)
+    await reg_write(dut, SM_INSTR(1), 0xE080)            # SM1: set pindirs 0
+    await reg_write(dut, SM_INSTR(0), 0xE001)            # SM0: set pins 1
+    await reg_write(dut, SM_INSTR(0), 0xE081)            # SM0: set pindirs 1
     await ClockCycles(dut.clk, 2)
     assert int(dut.o_gpio_pindir.value) & 1 == 1 and pin(dut, 0) == 1, "SM0's later write lost to SM1"
-    await wb_write(dut, SM_INSTR(1), 0xE000)            # SM1: set pins 0 (direction stays SM0's)
+    await reg_write(dut, SM_INSTR(1), 0xE000)            # SM1: set pins 0 (direction stays SM0's)
     await ClockCycles(dut.clk, 2)
     assert int(dut.o_gpio_pindir.value) & 1 == 1 and pin(dut, 0) == 0
-    await wb_write(dut, REG_CTRL, 0x3 << 4)             # restarting both changes nothing on the pin
+    await reg_write(dut, REG_CTRL, 0x3 << 4)             # restarting both changes nothing on the pin
     await ClockCycles(dut.clk, 2)
     assert int(dut.o_gpio_pindir.value) & 1 == 1 and pin(dut, 0) == 0
 
@@ -265,37 +265,37 @@ async def test_pin_latch_latest_writer_wins(dut):
 async def test_sm_instr_runs_while_disabled(dut):
     """SMx_INSTR executes immediately, also while the SM is disabled ([SPEC-PIO-05])."""
     await init_tile(dut)
-    await wb_write(dut, SM_PINCTRL(0), SET_PIN0)
-    await wb_write(dut, SM_INSTR(0), 0xE001)             # set pins, 1
+    await reg_write(dut, SM_PINCTRL(0), SET_PIN0)
+    await reg_write(dut, SM_INSTR(0), 0xE001)             # set pins, 1
     await ClockCycles(dut.clk, 5)
     assert pin(dut, 0) == 1
-    await wb_write(dut, SM_INSTR(0), 0x0005)             # jmp 5
+    await reg_write(dut, SM_INSTR(0), 0x0005)             # jmp 5
     await ClockCycles(dut.clk, 5)
-    assert await wb_read(dut, SM_STAT(0)) & 0x1F == 5
+    assert await reg_read(dut, SM_STAT(0)) & 0x1F == 5
 
 
 FJOIN_TX, FJOIN_RX = 1 << 30, 1 << 31
 
 
 async def tx_full(dut, sm):
-    return (await wb_read(dut, REG_FIFO_STAT) >> (24 + sm)) & 1
+    return (await reg_read(dut, REG_FIFO_STAT) >> (24 + sm)) & 1
 
 
 @cocotb.test()
 async def test_fifo_join_tx_and_flush(dut):
     """Rule 8: FJOIN_TX gives an 8-word TX FIFO; changing FJOIN empties the FIFOs."""
     await init_tile(dut)
-    await wb_write(dut, SM_SHIFTCTRL(0), FJOIN_TX)
+    await reg_write(dut, SM_SHIFTCTRL(0), FJOIN_TX)
     for i in range(7):
-        await wb_write(dut, SM_TXF(0), i)
+        await reg_write(dut, SM_TXF(0), i)
         assert not await tx_full(dut, 0), f"full after {i + 1} words with FJOIN_TX"
-    await wb_write(dut, SM_TXF(0), 7)
+    await reg_write(dut, SM_TXF(0), 7)
     assert await tx_full(dut, 0), "not full after 8 words"
-    await wb_write(dut, SM_SHIFTCTRL(0), 0)                     # unjoin: flush
+    await reg_write(dut, SM_SHIFTCTRL(0), 0)                     # unjoin: flush
     for i in range(3):
-        await wb_write(dut, SM_TXF(0), i)
+        await reg_write(dut, SM_TXF(0), i)
         assert not await tx_full(dut, 0), "TX FIFO was not emptied by the FJOIN change"
-    await wb_write(dut, SM_TXF(0), 3)
+    await reg_write(dut, SM_TXF(0), 3)
     assert await tx_full(dut, 0), "plain TX FIFO is not 4 deep"
 
 
@@ -303,11 +303,11 @@ async def test_fifo_join_tx_and_flush(dut):
 async def test_fifo_join_rx_8_words(dut):
     """Rule 8: FJOIN_RX keeps 8 pushed words, in order (pushes run through SMx_INSTR)."""
     await init_tile(dut)
-    await wb_write(dut, SM_SHIFTCTRL(0), FJOIN_RX)
+    await reg_write(dut, SM_SHIFTCTRL(0), FJOIN_RX)
     for k in range(10):
-        await wb_write(dut, SM_INSTR(0), 0xE020 | (k + 1))       # set x, k+1
-        await wb_write(dut, SM_INSTR(0), 0xA0C1)                 # mov isr, x
-        await wb_write(dut, SM_INSTR(0), 0x8000)                 # push noblock
+        await reg_write(dut, SM_INSTR(0), 0xE020 | (k + 1))       # set x, k+1
+        await reg_write(dut, SM_INSTR(0), 0xA0C1)                 # mov isr, x
+        await reg_write(dut, SM_INSTR(0), 0x8000)                 # push noblock
     assert await drain(dut, 0, 12) == [1, 2, 3, 4, 5, 6, 7, 8]
 
 
@@ -316,13 +316,13 @@ async def test_exec_stalled_latches_until_done(dut):
     """Rule 9: an SMx_INSTR `pull block` on an empty FIFO stays latched, EXEC_STALLED reads 1,
     and it completes when a word arrives (pio_sm_exec_wait_blocking)."""
     await init_tile(dut)
-    await wb_write(dut, SM_INSTR(0), 0x80A0)                     # pull block, FIFO empty
+    await reg_write(dut, SM_INSTR(0), 0x80A0)                     # pull block, FIFO empty
     await ClockCycles(dut.clk, 10)
-    assert await wb_read(dut, SM_EXECCTRL(0)) >> 31 == 1, "EXEC_STALLED not set"
-    await wb_write(dut, SM_TXF(0), 0x1234_5678)
+    assert await reg_read(dut, SM_EXECCTRL(0)) >> 31 == 1, "EXEC_STALLED not set"
+    await reg_write(dut, SM_TXF(0), 0x1234_5678)
     await ClockCycles(dut.clk, 4)
-    assert await wb_read(dut, SM_EXECCTRL(0)) >> 31 == 0, "EXEC_STALLED stuck"
-    await wb_write(dut, SM_INSTR(0), 0xA0C7)                     # mov isr, osr
-    await wb_write(dut, SM_INSTR(0), 0x8020)                     # push block
+    assert await reg_read(dut, SM_EXECCTRL(0)) >> 31 == 0, "EXEC_STALLED stuck"
+    await reg_write(dut, SM_INSTR(0), 0xA0C7)                     # mov isr, osr
+    await reg_write(dut, SM_INSTR(0), 0x8020)                     # push block
     await ClockCycles(dut.clk, 2)                                # SMx_INSTR runs 2 clocks after the write
     assert await drain(dut, 0) == [0x1234_5678]
