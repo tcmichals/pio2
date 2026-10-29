@@ -41,3 +41,15 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Also**: `pio2-cocotb --timeout` (default 900 s per suite) so a hung suite fails instead of blocking.
 * **Not verified**: formal on the port (ZipCPU properties not fetched yet); AbstractX does not build
   against this tile until its wrapper adds a Wishbone-to-AXI4-Lite bridge.
+
+## 2026-10-29: First formal check: ZipCPU faxil_slave on the tile's AXI4-Lite port
+
+* **Category**: `process-gap` (formal added)
+* **What**: `tests/formal/pio_tile_axil.sv` binds `faxil_slave` (third_party/wb2axip, Apache-2.0) to
+  `asp_pio_tile`'s AXI4-Lite port (async reset option); `pio_tile_axil.sby` has `bmc` and `prove` tasks.
+* **Result**: `sby -f pio_tile_axil.sby bmc`: PASS, depth 24, 18 s (smtbmc yices, oss-cad-suite 20260614).
+  Mutant (BVALID dropped without BREADY): FAIL at step 21, `faxil_slave.v:340`.
+* **Not closed**: `prove` (k-induction) was still trying induction at step 3 after ~25 minutes and was
+  stopped. Induction over the whole tile needs invariants that tie faxil_slave's outstanding counters to
+  the front end's held / valid flags (and probably a smaller harness that cuts the state machines off).
+  Until then the AXI4-Lite port is bounded-checked to 24 clocks, not proved.

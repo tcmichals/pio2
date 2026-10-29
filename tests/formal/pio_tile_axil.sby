@@ -1,0 +1,30 @@
+# Formal check of the PIO tile's AXI4-Lite port with ZipCPU's faxil_slave ([SPEC-AXI-04], [SPEC-VER-01]).
+#   cd tests/formal && sby -f pio_tile_axil.sby bmc     # bounded, 24 clocks
+#   cd tests/formal && sby -f pio_tile_axil.sby prove   # k-induction (unbounded)
+[tasks]
+bmc
+prove
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+prove: mode prove
+prove: depth 24
+multiclock off
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal faxil_slave.v
+read -sv asp_pio_sm.sv asp_pio_tlp_ingress.sv asp_pio_tlp_shim.sv asp_pio_tile.sv
+read -formal pio_tile_axil.sv
+prep -top pio_tile_axil
+
+[files]
+../../third_party/wb2axip/bench/formal/faxil_slave.v
+../../src/rtl/asp_pio_sm.sv
+../../src/rtl/asp_pio_tlp_ingress.sv
+../../src/rtl/asp_pio_tlp_shim.sv
+../../src/rtl/asp_pio_tile.sv
+pio_tile_axil.sv

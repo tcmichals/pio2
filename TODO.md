@@ -20,7 +20,8 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 
 1. [ ] Interconnect RTL, in order, each with formal + UVM-style cocotb + coverage ([SPEC-VER-01]):
    1. [x] Verification base: uv deps (cocotbext-axi, pyuvm, cocotb-coverage); ZipCPU property files from
-      the `third_party/wb2axip` submodule; [ ] first formal .sby (tile AXI4-Lite port with faxil_slave)
+      the `third_party/wb2axip` submodule; [x] first formal .sby (tile AXI4-Lite port, faxil_slave): BMC
+      depth 24 passes, mutant fails; [ ] k-induction (needs invariants; stopped after 25 min at step 3)
    2. [x] Tile register port Wishbone -> AXI4-Lite ([SPEC-AXI-04]); all tile suites through cocotbext-axi
       (43 tests); front-end suite with stalls, orders, SLVERR, exactly-once; two mutants caught
    2b. [x] Reuse ([SPEC-AXI-05]): Forencich verilog-axi / verilog-axis and ZipCPU wb2axip as pinned

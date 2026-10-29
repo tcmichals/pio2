@@ -7,3 +7,5 @@ results.xml
 *.fst
 obj_dir/
 build/
+pio_tile_axil_*/
+pio_tile_axil/
