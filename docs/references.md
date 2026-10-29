@@ -14,6 +14,8 @@ Linked, not copied: the documents stay with their owners.
 
 ## Tools
 
+* Betaflight (PIO DShot / ESC programs, read from a checkout): <https://github.com/betaflight/betaflight>
+
 * pico-sdk (pioasm lives in `tools/pioasm`): <https://github.com/raspberrypi/pico-sdk>
 * pico-examples (source of `src/programs/examples/pico/`): <https://github.com/raspberrypi/pico-examples>
 * Verilator: <https://verilator.org/guide/latest/>
@@ -26,6 +28,7 @@ Linked, not copied: the documents stay with their owners.
 
 Listed to compare against; check each project's current state and license before reusing anything.
 
-* Wokwi RP2040 simulation, browser based, includes PIO: <https://wokwi.com/>
+* Wokwi RP2040 simulation, browser based, includes PIO: <https://wokwi.com/>; Pi Pico examples:
+  <https://wokwi.com/pi-pico> (behaviour reference for `[SPEC-DBG-11]`; linked, not copied)
 * rp2040pio, a Java PIO emulator with a GUI (soundpaint): <https://github.com/soundpaint/rp2040pio>
 * rp2040-pio-emulator, Python (NathanY3G): <https://github.com/NathanY3G/rp2040-pio-emulator>

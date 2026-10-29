@@ -117,6 +117,26 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
   Controls (step clock / step instr / run / back / reset, cycle counter), Console (Python).
   The layout is saved per project.
 
+### `[SPEC-DBG-11]` Example Sessions That Ship With the Debugger
+* **Requirement**: the debugger opens ready-made sessions (program + pin map + stimulus + what to look
+  at), each also a headless regression (`[SPEC-DBG-09]`):
+  1. **pico-examples** already in `src/programs/examples/pico/` (blink, squarewave, uart_tx/rx, ws2812,
+     spi, i2c, pwm, quadrature encoder, ...), with the stimulus the original example expects.
+  2. **Wokwi Pi Pico projects** (<https://wokwi.com/pi-pico>) as a behaviour reference: for an example
+     that also runs there, the session notes the expected waveform so the two can be compared by
+     eye. Wokwi content is linked, not copied.
+  3. **Betaflight PIO programs** (DShot, bidirectional DShot, serial ESC passthrough), read from a
+     Betaflight checkout through `pio2-examples` (`BETAFLIGHT_DIR`), the same way the tests do.
+     (pio2 and Betaflight are both GPL-3.0, so vendoring them later is allowed if wanted.)
+  4. **Our ESC programs**: `src/programs/dshot_bidir.pio` with the ESC eRPM reply generator, and
+     `src/programs/esc_serial.pio` (4-way passthrough, 19200 8N1, half-duplex turnaround).
+  5. **IMU auto-DMA**: a program that waits on a DRDY pin, clocks an SPI burst from a simulated IMU
+     (register-image slave on the pins), and the tile's TLP path packs the samples into 64-byte TLPs.
+     A TLP view decodes each frame (header, timestamp, payload) and links it back to the cycles and
+     SM instructions that produced it.
+* **Requirement (TLP view)**: frames on `m_tlp_*` / `s_tlp_*` are shown as a list with decoded
+  fields and a cycle stamp; clicking one moves the cursor to that cycle.
+
 ## 5. Milestones
 
 | M | Content | Done when |
@@ -126,5 +146,5 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 | M2 | GUI: controls, source, SM state, FIFOs | load blink/uart_tx, step, see PC/registers change |
 | M3 | logic analyzer, timeline, FST/JSON export | DShot frame measured between cursors |
 | M4 | breakpoints/watchpoints, reverse step | reverse-step test bit-identical |
-| M5 | stimulus generators | ESC serial and DShot reply driven from the GUI |
+| M5 | stimulus generators, example sessions ([SPEC-DBG-11]) | ESC serial, DShot reply and the IMU auto-DMA session run from the GUI and headless |
 | M6 | diff mode against a reference emulator | first divergence shown on a seeded bug |
