@@ -1,4 +1,4 @@
-# pio2 Interconnect: Host Link (SPI / Dual-SPI), Channels, Wishbone, DMA, Trace
+# pio2 Interconnect: Host Link (SPI / Dual-SPI), Channels, AXI4-Lite, AXI-Stream, DMA, Trace
 
 Status: specification, nothing implemented yet (2026-10-29). Requirements carry tags; code that
 implements one carries `@impl [SPEC-xxx-nn] docs/INTERCONNECT_SPECIFICATION.md`.
@@ -7,48 +7,65 @@ implements one carries `@impl [SPEC-xxx-nn] docs/INTERCONNECT_SPECIFICATION.md`.
 
 The PIO IP looks to the host like a small network interface: one SPI link (single or dual data
 lines) carries **numbered channels**, like ports. Channel 0 is addressed register access (read and
-write any Wishbone address); the other channels are **streams** (data to and from the PIO through
-DMA rings, and the trace). An interrupt pin tells the host which channel needs service. Inside the
-FPGA everything is Wishbone; there is no AXI and no TLP in pio2 (AbstractX adds its TLP adapters in
-its own wrapper, `[SPEC-ICN-09]`).
+write any register address); the other channels are **streams** (data to and from the PIO through
+DMA rings, and the trace). An interrupt pin tells the host which channel needs service.
+
+Inside the FPGA (decision 2026-10-29): **AXI4-Lite** is the control plane (registers) and
+**AXI-Stream** the data plane (FIFO data, DMA, trace), everywhere, including the PIO tile's own
+register port. There is **no Wishbone and no TLP in pio2**. The same buses face the Zynq PS directly,
+and the verification can use proven AXI tools (`[SPEC-VER-01]`). AbstractX, which still uses Wishbone
+and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 
 ```
  host SPI master                                FPGA
- ───────────────     ┌───────────────────────────────────────────────────────────────────┐
-  SCK, CS_n ────────►│ SPI PHY            framer (≤128 B,     channel mux / arbiter       │
-  IO0 (MOSI) ◄──────►│ single / dual  ──► CRC32), NIC regs──►  ch0  register master ──┐    │
-  IO1 (MISO) ◄──────►│ (per frame)        status, credits      ch1  trace  (out) ◄─┐  │    │
-  INT_n ◄────────────│                                         ch2+ streams in/out │  │    │
-                     │                                              ▲   │          │  ▼    │
-                     │                         DMA engine ◄── rings in BRAM        │ Wishbone│
-                     │                          │   ▲  (DREQ from PIO FIFOs)       │ arbiter │
-                     │                          ▼   │                              │  + decoder
-                     │                 PIO tile (Wishbone slave) ── events ──► event FIFO   │
-                     └───────────────────────────────────────────────────────────────────┘
+ ───────────────     ┌────────────────────────────────────────────────────────────────────┐
+  SCK, CS_n ────────►│ SPI PHY          framer (≤128 B,      channel mux                   │
+  IO0 (MOSI) ◄──────►│ single / dual ──► CRC32), NIC regs ──► ch0  AXI4-Lite master ──┐     │
+  IO1 (MISO) ◄──────►│                                        ch1  trace   AXIS in  ◄─┐│     │
+  INT_n ◄────────────│                                        ch2+ streams AXIS in/out ││     │
+                     │                                             ▲  │               ││     │
+                     │                        ring RAM (AXIS) ◄────┘  ▼               ││ AXI4-Lite
+                     │                           ▲  │   DMA engine (AXIS)             ││ crossbar
+                     │                           │  ▼                                 ││     │
+                     │       PIO tile: per-SM TX / RX FIFO AXIS ports ── events ──► event FIFO
+                     │       AXI4-Lite register slave ◄───────────────────────────────┘     │
+                     └────────────────────────────────────────────────────────────────────┘
+ Zynq: the PS GP AXI master is a second AXI4-Lite master on the crossbar; the PS AXI DMA connects
+ to the ring AXIS ports ([SPEC-ICN-11]).
 ```
 
-## 2. Wishbone
+## 2. Buses
 
-### `[SPEC-WB-01]` One Bus Profile: Wishbone B4, Classic and Pipelined
-* **Requirement**: every internal port is Wishbone B4, 32-bit data, byte address, `sel` per byte.
-  Classic single accesses (`cyc stb we adr dat sel ack`) for registers. Pipelined mode adds
-  `stall` (slave not ready; the master holds the request) and burst tags:
-  * `cti = 3'b000` classic, `3'b001` **constant-address burst** (FIFO ports: one address, N words),
-    `3'b010` **incrementing burst** (memory: program load, ring buffers), `3'b111` end of burst;
-  * `bte = 2'b00` linear only.
-* **Requirement**: a slave that does not implement bursts answers each beat as a classic cycle
-  (bursts are an optimisation, never required for correctness). `err` ends a cycle on an unmapped
-  address. No `rty`.
-* **Verified by**: cocotb bus checker on every port (flags any B4 rule violation), randomized
-  `stall` / `ack` timing; SymbiYosys properties for master and slave compliance.
-* **Implementation Target**: `src/rtl/wb/`, `tests/cocotb/wb_checker.py`
+### `[SPEC-AXI-01]` Control Plane: AXI4-Lite
+* **Requirement**: every register block is an AXI4-Lite slave: 32-bit data, byte addresses, `WSTRB`
+  per byte, `PROT` ignored, responses `OKAY` or `SLVERR` (`DECERR` from the crossbar for an unmapped
+  address). All five channels follow AXI4 rules (AMBA AXI and ACE spec, IHI 0022, section A3): a
+  source keeps `VALID` and its payload stable until `READY`; `VALID` never waits for `READY`; write
+  address and write data are accepted in any order or together; one `B` response per write, one `R`
+  per read; no combinational path from an input `VALID` to an output `READY` that could deadlock.
+* **Requirement**: every slave sustains one transaction per clock when its master and the crossbar allow
+  it (back-to-back, no forced idle cycle), and holds at most `N_OUTSTANDING` (default 2) per direction.
+* **Verified by**: `formal-check` (ZipCPU AXI4-Lite properties on every master and slave port),
+  `cocotb-regression` (cocotbext-axi master / monitor, randomized `READY` / `VALID` gaps, 1000
+  transactions per slave, functional coverage of the handshake orders)
+* **Implementation Target**: `src/rtl/axi/`
 
-### `[SPEC-WB-02]` Interconnect: Arbiter and Address Decoder
-* **Requirement**: masters: the link's register master (channel 0) and the DMA engine. Slaves: PIO
-  tile, DMA registers, ring-buffer RAM, event FIFO, link registers. Round-robin arbitration with a
-  configurable DMA priority (the DMA engine may win every tie so a state machine never starves while
-  the host reads registers); a master holds the bus for a whole burst; a burst is bounded
-  (`MAX_BURST`, default 16 beats) so neither master can block the other.
+### `[SPEC-AXI-02]` Data Plane: AXI-Stream
+* **Requirement**: FIFO data, DMA transfers, link stream channels and the trace use AXI-Stream (AMBA
+  AXI4-Stream spec, IHI 0051): 32-bit `TDATA`, `TVALID` / `TREADY`, `TLAST` at the end of a block
+  (a DMA block, a link frame's payload, a trace packet), optional `TKEEP` for a partial last word,
+  `TUSER` for errors where stated. `TVALID` and its data stay stable until `TREADY`.
+* **Requirement (pacing)**: a PIO TX FIFO's `TREADY` is "not full" and an RX FIFO's `TVALID` is "not
+  empty", so the AXI-Stream handshake is the data request (RP2040 DREQ) and nothing else is needed.
+* **Verified by**: `formal-check` (ZipCPU AXI-Stream properties on every port), `cocotb-regression`
+  (cocotbext-axi source / sink with random back-pressure, `TLAST` framing checked, no word lost or
+  duplicated over 1000 blocks)
+* **Implementation Target**: `src/rtl/axi/`, `src/rtl/dma/`
+
+### `[SPEC-AXI-03]` AXI4-Lite Crossbar and Address Map
+* **Requirement**: masters: the link's channel-0 master and (on the Zynq) the PS GP port. Slaves: PIO
+  tile front end, DMA registers, event FIFO / trace registers, link registers. Round-robin between
+  masters; `DECERR` on an unmapped address; a slow slave never blocks a transaction to another one.
 * **Requirement (address map, base 0x0000_0000, 4 KB windows)**:
 
   | Window | Slave |
@@ -57,9 +74,20 @@ its own wrapper, `[SPEC-ICN-09]`).
   | `0x1000` | DMA engine registers (per channel) |
   | `0x2000` | event FIFO / trace registers |
   | `0x3000` | link registers (version, channel status, interrupt mask, error counters) |
-  | `0x1_0000` | ring-buffer RAM (size per build, default 16 KB) |
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_wb_interconnect_cocotb.py`: fairness, bounded bursts, err on unmapped), `formal-check`
-* **Implementation Target**: `src/rtl/wb/pio2_wb_interconnect.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_xbar_cocotb.py`: fairness, `DECERR`,
+  two masters at once), `formal-check`
+* **Implementation Target**: `src/rtl/axi/pio2_axil_xbar.sv`
+
+### `[SPEC-AXI-04]` The PIO Tile's Register Port Is AXI4-Lite
+* **Requirement**: `asp_pio_tile`'s register port is an AXI4-Lite slave (`[SPEC-AXI-01]`) with the same
+  register map as before (CTRL, FSTAT, FDEBUG, IRQ, SMx_*, TXFx / RXFx, INSTR_MEM). Its Wishbone port is
+  removed; pio2 contains no Wishbone. AbstractX connects its Wishbone master through a Wishbone to
+  AXI4-Lite bridge in its own wrapper (`[SPEC-ICN-09]`).
+* **Requirement**: the move keeps behaviour: every existing tile test (tile, conformance, DShot, ESC
+  serial) passes through the AXI4-Lite port, driven by cocotbext-axi, before and after.
+* **Verified by**: `cocotb-regression` (all tile suites through the AXI4-Lite port), `formal-check`
+  (ZipCPU `faxil_slave` on the tile port)
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`
 
 ## 3. Host link
 
@@ -70,18 +98,27 @@ its own wrapper, `[SPEC-ICN-09]`).
   rest of the window: single (MOSI = IO0, MISO = IO1) or dual (IO0 and IO1 both carry data, 2 bits
   per clock; one turnaround clock before the FPGA drives). The FPGA returns the low byte of `ISR`
   during the command byte, so every window also tells the host what is pending.
-* **Requirement**: SCK is sampled in the system clock domain (2-flop synchroniser, edge detect);
-  SCK must be at most f_sys / 4. The tested limit per board is recorded in `docs/boards.md`.
+* **Requirement (clocking, 2026-10-29)**: SCK clocks the PHY's shift registers directly (its own clock
+  domain); bytes cross to the system clock through a small asynchronous FIFO (Gray-coded pointers,
+  2-flop synchronisers), never by sampling SCK with the system clock. SCK is independent of f_sys,
+  limited only by the pins and the board wiring.
+* **Requirement (throughput)**: at least **10 MB/s of payload** on Dual SPI (about 50 MHz SCK: 100 Mbit/s
+  raw, ~11 MB/s after the 12-byte header and CRC per 128-byte frame), sustained in both directions on a
+  Tang Nano 20K, with the host and wiring stated. Single SPI gives half. Quad SPI is a later option if
+  more is needed.
+* **Rationale**: sampling SCK at f_sys / 4 (the first draft) caps a 27 MHz Tang at ~1.5 MB/s on Dual
+  SPI, below the goal; the internal buses are not the limit (32-bit AXI-Stream at 27 MHz is
+  ~108 MB/s).
 * **Requirement**: pins as separate `_i`, `_o`, `_oe` signals at the IP boundary; tristate only in
   the board top (the same rule the PIO pins follow).
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_phy_cocotb.py`: single and dual, at f_sys/4), `board-bringup` (SCK limit per board)
-* **Implementation Target**: `src/rtl/link/pio2_spi_phy.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_phy_cocotb.py`: single and dual, SCK unrelated to and faster than f_sys, async FIFO under randomized clock ratios), `formal-check` (async FIFO pointers), `board-bringup` (10 MB/s measured, SCK limit per board)
+* **Implementation Target**: `src/rtl/link/pio2_spi_phy.sv`, `src/rtl/link/pio2_async_fifo.sv`
 
 ### `[SPEC-LINK-02]` Frames: At Most 128 Bytes, CRC32, Like a NIC
 * **Requirement**: the link carries **frames** of at most 128 bytes, framed by CS_n. A framer on each
   side checks and adds a CRC32 (CRC-32/ISO-HDLC, the Ethernet polynomial `0x04C11DB7`, reflected,
   init and final XOR `0xFFFFFFFF`) over header and payload. A frame whose CRC fails is dropped whole
-  and counted; nothing of it reaches Wishbone or a ring.
+  and counted; nothing of it reaches a bus or a ring.
 * **Requirement (frame layout, little endian)**:
 
   | Offset | Size | Field |
@@ -166,14 +203,15 @@ its own wrapper, `[SPEC-ICN-09]`).
 ### `[SPEC-DMA-01]` Channels Paced by the PIO FIFOs
 * **Requirement**: eight channels. Each moves 32-bit words between a ring buffer in RAM and one PIO
   FIFO (TX of SM n, or RX of SM n), paced by that FIFO's data request (TX not full / RX not empty),
-  as RP2040 DMA is paced by DREQ. FIFO side: constant-address burst; ring side: incrementing burst.
+  as RP2040 DMA is paced by DREQ; both sides are AXI-Stream (`[SPEC-AXI-02]`), so the FIFO's handshake
+  is the pacing.
 * **Requirement (modes)**: `ONE_SHOT` (N words, then done), `RING` (continuous; ring wraps),
   `TRIGGERED` (each trigger moves one block of N words; trigger = a PIO IRQ flag or an input pin, e.g.
   IMU DRDY), `DIRECT` (no ring: the link stream feeds or drains the FIFO directly, back-pressured by
-  Wishbone `stall`; low latency, low rate).
+  `TREADY`; low latency, low rate).
 * **Requirement (counters)**: per channel: words moved, underruns (TX FIFO wanted data, ring empty),
-  overruns (RX FIFO had data, ring full), each counted and each producing a trace event. A DMA channel
-  never blocks the bus beyond `MAX_BURST` beats.
+  overruns (RX FIFO had data, ring full), each counted and each producing a trace event. Channels share
+  the ring RAM by round robin, at most `MAX_BURST` (default 16) words per turn.
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_dma_cocotb.py`: each mode, DREQ pacing, underrun/overrun counted, 1000-block steady state)
 * **Implementation Target**: `src/rtl/dma/pio2_dma.sv`
 
@@ -213,30 +251,30 @@ its own wrapper, `[SPEC-ICN-09]`).
 
 ## 6. Integration and tests
 
-### `[SPEC-ICN-09]` pio2 Has No AXI or TLP; AbstractX Wraps It
-* **Requirement**: the pio2 tile exposes Wishbone (+ FIFO data requests and the event port) only. The
-  TLP ingress/egress adapters move out of `asp_pio_tile` into an AbstractX-side wrapper, which keeps
-  AbstractX's AXI-Stream / TLP router working unchanged; its TLP-path test moves with it.
-* **Verified by**: `cocotb-regression` (pio2 tile has no TLP ports; AbstractX wrapper passes AbstractX's TLP-path test)
+### `[SPEC-ICN-09]` Tile Split: TLP Adapters Out, AXI-Stream FIFO Ports and Event Port In
+* **Requirement**: `asp_pio_tile` loses its TLP ingress / egress adapters; they move to an AbstractX-side
+  wrapper (with AbstractX's Wishbone to AXI4-Lite bridge, `[SPEC-AXI-04]`) that keeps AbstractX's TLP
+  router, its Wishbone fabric and its TLP-path test working unchanged. The tile gains,
+  per state machine, an AXI-Stream TX input and RX output on its FIFOs (`[SPEC-AXI-02]` pacing) and an
+  event output for `[SPEC-TRC-01]`. Register access to the FIFOs stays (TXFx / RXFx) for software that
+  does not use DMA.
+* **Verified by**: `cocotb-regression` (tile tests through the AXI-Stream FIFO ports; AbstractX wrapper
+  passes AbstractX's TLP-path test)
 * **Implementation Target**: `src/rtl/asp_pio_tile.sv`
 
-### `[SPEC-ICN-11]` Host Adapters: SPI Link for Tang, AXI for Zynq
-* **Requirement**: the core (Wishbone interconnect, DMA engine, rings, event FIFO, PIO tile) is the
-  same on every board; only the host adapter changes:
-  * **SPI link** (`[SPEC-LINK-*]`): boards where an external CPU talks over SPI / Dual-SPI (Tang Nano
-    9K / 20K with a Pico, an SBC or the Cubie).
-  * **AXI** (Zynq-7000, where the ARM cores reach the fabric over AXI): an **AXI4-Lite to Wishbone
-    bridge** for registers (one Wishbone master in place of the link's channel-0 master), and
-    **AXI-Stream ports on the DMA rings** (one in and one out per stream channel), so the Zynq PS
-    moves bulk data with its AXI DMA or HP ports instead of SPI frames. Trace records leave on an
-    AXI-Stream port the same way. The interrupt is a PL-to-PS IRQ line with the same `ISR` / `IMR`.
-* **Requirement**: AXI exists only in these adapters, at the edge; nothing inside the core is AXI. The
-  host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap for AXI4-Lite,
-  a DMA buffer for the streams) with the same channel API.
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_wb_cocotb.py`: AXI4-Lite protocol
-  checker and Wishbone checker on the two sides; `tests/cocotb/test_axis_ring_cocotb.py`: back-pressure,
-  `tlast` per block), `board-bringup` (Zynq)
-* **Implementation Target**: `src/rtl/host/pio2_axil_wb.sv`, `src/rtl/host/pio2_axis_ring.sv`, `src/pio2/host/zynq.py`
+### `[SPEC-ICN-11]` Host Adapters: SPI Link for Tang, Native AXI for Zynq
+* **Requirement**: the core (AXI4-Lite crossbar, DMA engine, rings, event FIFO, PIO tile) is the same on
+  every board; only the host side changes:
+  * **SPI link** (`[SPEC-LINK-*]`): an external CPU over SPI / Dual-SPI (Tang Nano 9K / 20K with a Pico,
+    an SBC or the Cubie). The link's channel 0 is an AXI4-Lite master; its stream channels are AXI-Stream.
+  * **Zynq-7000**: no adapter logic. The PS GP AXI port (through the Xilinx AXI interconnect / protocol
+    converter to AXI4-Lite) is a second crossbar master; the PS AXI DMA (or HP ports) connects to the
+    ring AXI-Stream ports; the interrupt is a PL-to-PS IRQ line with the same `ISR` / `IMR`.
+* **Requirement**: the host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap
+  for the registers, a DMA buffer for the streams) with the same channel API.
+* **Verified by**: `cocotb-regression` (the core with two AXI4-Lite masters at once), `board-bringup`
+  (Zynq: registers and one stream through the PS)
+* **Implementation Target**: `src/rtl/pio2_core.sv`, `src/pio2/host/zynq.py`
 
 ### `[SPEC-ICN-12]` On the Tang Boards the PIO Replaces the Hardwired Cores
 * **Goal (project owner, 2026-10-29)**: DShot, bidirectional DShot, ESC serial passthrough and UART are
@@ -250,11 +288,27 @@ its own wrapper, `[SPEC-ICN-09]`).
   cores), `board-bringup` (motor and ESC on a Tang)
 * **Implementation Target**: `src/programs/`, `boards/tang_nano9k/`, `boards/tang_nano20k/`
 
-### `[SPEC-ICN-10]` Verification
-* **Requirement**: per block a cocotb test with the bus checker and randomized timing, and a
-  1000-transaction steady-state case; formal (SymbiYosys) for Wishbone compliance of each port; an
-  end-to-end test with the Python host driver speaking single and dual SPI to the whole IP, running
-  the three `[SPEC-DMA-02]` examples; every test shown to fail on a deliberately broken block.
-* **Requirement**: resource use (LUT / FF / BRAM) on Tang Nano 9K and 20K recorded per change.
-* **Verified by**: `cocotb-regression`, `formal-check`, `fpga-fit`
-* **Implementation Target**: `tests/cocotb/`, `tests/formal/`
+### `[SPEC-VER-01]` Full Validation: Formal Properties, UVM-Style Testbenches, Coverage
+* **Goal (project owner, 2026-10-29)**: full validation of every bus port and block, not only directed
+  tests.
+* **Requirement (formal)**: every AXI4-Lite and AXI-Stream port carries the ZipCPU formal property
+  sets (Dan Gisselquist, `wb2axip`: `faxil_slave`, `faxil_master`, `faxis_master`, `faxis_slave`; used
+  under their license, fetched at a pinned commit by `pio2-setup-tools`, license file kept) and is
+  proved with SymbiYosys: bounded model check to a stated depth and k-induction where it closes; the
+  async FIFO pointers and the CRC32 framer have their own properties. Every proof is shown to fail on
+  a deliberately broken copy of the block.
+* **Requirement (simulation)**: cocotb testbenches built UVM-style with **pyuvm** (sequences, drivers,
+  monitors, scoreboard, environment per block), using **cocotbext-axi** for AXI4-Lite and AXI-Stream
+  masters, slaves and monitors, constrained-random sequences, random back-pressure on every
+  `READY`, and a reference model per block (scoreboard compares).
+* **Requirement (coverage)**: functional coverage with **cocotb-coverage**: per AXI port the handshake
+  orders (AW before W, W before AW, together; READY before VALID and after), back-pressure lengths,
+  responses; per block its modes and error paths (CRC fail, overflow, underrun, drop). A block is
+  done when every cover point is hit, recorded per run.
+* **Requirement (steady state)**: 1000 transactions or blocks per test, with no growth in any queue or
+  counter that should return to zero.
+* **Requirement (system)**: an end-to-end test with the Python host driver speaking single and dual SPI
+  to the whole core, running the three `[SPEC-DMA-02]` examples. Resource use (LUT / FF / BRAM) on Tang
+  Nano 9K and 20K recorded per change.
+* **Verified by**: `formal-check`, `cocotb-regression`, `fpga-fit`
+* **Implementation Target**: `tests/formal/`, `tests/cocotb/`, `tests/uvm/`

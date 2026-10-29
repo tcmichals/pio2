@@ -4,7 +4,8 @@ A programmable I/O block that runs the Raspberry Pi RP2040 / RP2350 PIO instruct
 written in SystemVerilog for FPGAs, plus the tools to write, test and **see** PIO programs run.
 
 * `src/rtl/`: the PIO tile (four state machines, shared 32-word instruction memory, FIFOs, IRQs,
-  pin mapping, side-set), a Wishbone register port, and an optional 64-byte TLP stream adapter.
+  pin mapping, side-set), with its register port moving to AXI4-Lite and its FIFOs to AXI-Stream
+  (today still the Wishbone port and a TLP adapter inherited from AbstractX).
 * `src/programs/`: the program library (`.pio` sources and the `pioasm` images next to them):
   bidirectional DShot600, ESC serial passthrough, the conformance suite, and programs from
   Raspberry Pi's pico-examples (BSD-3-Clause, see `src/programs/examples/pico/LICENSE.TXT`).
@@ -28,18 +29,20 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
 * **One host link, like a small NIC** ([`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md)): SPI or
   Dual-SPI with an interrupt pin, carrying frames of at most 128 bytes with CRC32, NIC-style
   registers (`ISR` / `IMR`, frame queues, error counters), and numbered channels: channel 0 for
-  addressed register access, the others as streams. Inside the FPGA everything is Wishbone B4
-  (classic for registers, pipelined bursts for streaming); a DMA engine paced by the PIO FIFOs moves
-  data between ring buffers and the state machines. No AXI, no TLP in pio2 (AbstractX adds its TLP
-  adapters around the tile in its own wrapper).
+  addressed register access, the others as streams. Inside the FPGA: AXI4-Lite for registers and
+  AXI-Stream for data; a DMA engine paced by the PIO FIFOs' AXI-Stream handshake moves data between
+  ring buffers and the state machines. No Wishbone and no TLP in pio2 (AbstractX bridges to it in its
+  own wrapper).
 * **Same protocol for simulation and hardware.** The IDE / debugger drives the simulated IP through the
   same host driver as a board (at the SPI pins bit for bit, or straight to the channels for speed).
 * **Tracing is barectf / CTF 1.8**, with AbstractX's schema (`trace/barectf_config.yaml`, which already
   has `pio_event`: tile, SM, event type, PC, duration, next to `tlp_push` / `tlp_pop`). Simulation
   traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
   simulated run can be compared with a board run event by event.
-* **Zynq: AXI only at the edge.** On the Zynq-7000 the host adapter is an AXI4-Lite to Wishbone bridge
-  and AXI-Stream ports on the DMA rings ([SPEC-ICN-11]); the core inside stays Wishbone.
+* **Zynq: native AXI.** On the Zynq-7000 the PS GP port is a second AXI4-Lite master and the PS AXI
+  DMA connects to the ring AXI-Stream ports ([SPEC-ICN-11]); no bridge.
+* **Full validation** ([SPEC-VER-01]): ZipCPU's AXI formal properties under SymbiYosys, UVM-style
+  pyuvm testbenches with cocotbext-axi, functional coverage with cocotb-coverage.
 * **Example boards: Tang Nano 9K and Tang Nano 20K** (Gowin, open-source flow). The board tops,
   pin constraints and bitstream build stay in AbstractX (`hw/tang9k/`, `hw/tang_nano20k/`,
   `make -f hw/Makefile tang9k|tang_nano20k`); pio2 documents how to run its example programs on
@@ -62,7 +65,7 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
         │ barectf CTF traces (AbstractX schema)                 ┌───────────┴───────────┐
         ▼                                                       │                       │
    AbstractX Studio / babeltrace2                    Verilator model of        Tang Nano 9K / 20K
-                                                     src/rtl (simulation)      (Wishbone + DMA + link)
+                                                     src/rtl (simulation)      (AXI4-Lite/AXIS + DMA + link)
 ```
 
 ## Quick start
@@ -136,7 +139,7 @@ Rules for contributors and agents: [`AGENTS.md`](AGENTS.md) (AbstractX SpecTrace
 * [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md): requirements (`[SPEC-PIO-*]`), RP2040 parity checklist
 * [`docs/architecture.md`](docs/architecture.md): block diagram, register map, ports
 * [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md): visual single-step debugger and parts canvas design
-* [`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, Wishbone, DMA, barectf trace
+* [`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, AXI4-Lite / AXI-Stream, DMA, barectf trace, verification
 * [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)
 * [`docs/references.md`](docs/references.md): links to the Raspberry Pi datasheets and tools (not copied here)
 * [`docs/provenance.md`](docs/provenance.md): where every file came from

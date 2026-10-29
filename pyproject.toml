@@ -19,7 +19,13 @@ pio2-setup-tools = "pio2.setup_tools:main"
 pio2-cocotb = "pio2.run_cocotb:main"
 
 [dependency-groups]
-dev = ["cocotb>=2.0", "pytest>=8"]
+dev = [
+    "cocotb>=2.0",
+    "cocotb-coverage>=2.0",
+    "cocotbext-axi>=0.1.28",
+    "pytest>=8",
+    "pyuvm>=5.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

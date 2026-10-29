@@ -7,6 +7,7 @@ Run every cocotb suite in tests/cocotb (each test_*_cocotb.py) on Verilator.
   uv run pio2-cocotb --only dshot    # suites whose name contains "dshot"
   uv run pio2-cocotb --sim icarus    # another simulator
 
+A suite names its HDL top with a `# cocotb-toplevel: <module>` line (default asp_pio_tile).
 Each suite runs in a temporary copy of tests/cocotb, so no sim_build/ lands in the repository.
 A suite passes only if cocotb prints its TESTS= summary with FAIL=0; a suite that did not build or
 did not run fails (never a silent pass).
@@ -60,7 +61,9 @@ def main():
         cwd = work / "tests" / "cocotb"
         for name in names:
             shutil.rmtree(cwd / "sim_build", ignore_errors=True)
-            proc = subprocess.run(["make", f"MODULE={name}"], cwd=cwd, env=env, capture_output=True, text=True)
+            top = re.search(r"^# cocotb-toplevel:\s*(\S+)", (cwd / f"{name}.py").read_text(), re.M)
+            cmd = ["make", f"MODULE={name}"] + ([f"TOPLEVEL={top.group(1)}"] if top else [])
+            proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
             out = proc.stdout + proc.stderr
             m = None
             for m in SUMMARY.finditer(out):

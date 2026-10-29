@@ -6,7 +6,7 @@ pio2 follows the AbstractX SpecTrace rules (AbstractX `AGENTS.md`, `docs/SPECTRA
    blocks with `* **Requirement**:`, `* **Verified by**:` (skill names from `.agents/skills/`) and
    `* **Implementation Target**:` lines. Change the requirement before the code.
    * `docs/SPECIFICATION.md`: the PIO tile (`[SPEC-PIO-*]`)
-   * `docs/INTERCONNECT_SPECIFICATION.md`: host link, Wishbone, DMA, trace, host adapters
+   * `docs/INTERCONNECT_SPECIFICATION.md`: host link, AXI4-Lite / AXI-Stream, DMA, trace, host adapters, verification
      (`[SPEC-WB-*]`, `[SPEC-LINK-*]`, `[SPEC-DMA-*]`, `[SPEC-TRC-*]`, `[SPEC-ICN-*]`)
    * `docs/DEBUGGER_SPECIFICATION.md`: simulator, debugger, GUI (`[SPEC-DBG-*]`)
 2. **Tags in code.** Implementing code carries `// @impl [SPEC-*] <spec file>` (SystemVerilog, C++) or

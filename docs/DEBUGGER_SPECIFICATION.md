@@ -59,7 +59,7 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 * **Requirement**: the debugger simulates `src/rtl/asp_pio_tile.sv` with Verilator, unmodified. Internal
   state is made readable with a Verilator configuration file (`public_flat_rd` per signal), never by
   editing the RTL for the debugger.
-* **Requirement**: `libpio2sim.so` exports a C ABI: create/destroy, reset, Wishbone read/write, set input
+* **Requirement**: `libpio2sim.so` exports a C ABI: create/destroy, reset, AXI4-Lite register read/write, AXI-Stream FIFO push/pop, set input
   pins, read pin outputs and directions, step N clocks, read per-SM state, save/restore a snapshot,
   open/close an FST trace.
 * **Verified by**: `host-tests` (`tests/test_debug_session.py`)

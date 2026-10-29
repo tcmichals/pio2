@@ -11,35 +11,47 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Program library (`src/programs/`) | DShot bidir, ESC serial, conformance, pico-examples; images checked in |
 | Python package (uv) | `pio2-programs`, `pio2-examples`, `pio2-setup-tools`, `pio2-cocotb` |
 | SpecTrace format | done: 45 requirements, 0 broken / drift / unbacked; skills in `.agents/skills` |
-| Interconnect (link, Wishbone, DMA, trace, host adapters) | **specified only** |
+| Interconnect (link, AXI4-Lite / AXI-Stream, DMA, trace, host adapters) | **specified only** |
 | Debugger / simulator / GUI | **specified only** (milestones M1-M7) |
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
 
 ## Next
 
-1. [ ] Interconnect RTL, in order, each with cocotb + bus checker, and formal where it applies:
-   1. [ ] Wishbone B4 bus checker (`tests/cocotb/wb_checker.py`) and formal properties ([SPEC-WB-01])
-   2. [ ] Tile: TLP adapters out (to an AbstractX wrapper), FIFO data requests and event port out ([SPEC-ICN-09])
-   3. [ ] SPI PHY single / dual ([SPEC-LINK-01]), framer with CRC32 ([SPEC-LINK-02]), NIC registers ([SPEC-LINK-07])
-   4. [ ] Channel mux, credits, `INT_n` ([SPEC-LINK-03..05])
-   5. [ ] Wishbone interconnect ([SPEC-WB-02]), DMA engine and rings ([SPEC-DMA-01/02])
-   6. [ ] Event FIFO ([SPEC-TRC-01]) and host CTF conversion ([SPEC-TRC-02])
-   7. [ ] Python host driver with SPI-pins and direct back ends ([SPEC-LINK-06])
+1. [ ] Interconnect RTL, in order, each with formal + UVM-style cocotb + coverage ([SPEC-VER-01]):
+   1. [ ] Verification base: uv deps (cocotbext-axi, pyuvm, cocotb-coverage), ZipCPU property files via
+      `pio2-setup-tools --zipcpu-props` (pinned, license kept), one formal .sby template
+   2. [ ] Tile register port Wishbone -> AXI4-Lite ([SPEC-AXI-04]); all tile suites through cocotbext-axi
+   3. [ ] Tile: TLP adapters out (AbstractX wrapper with its WB->AXI4-Lite bridge), AXI-Stream FIFO
+      ports and event port in ([SPEC-ICN-09])
+   4. [ ] SPI PHY single / dual, SCK-clocked + async FIFO ([SPEC-LINK-01]), framer with CRC32
+      ([SPEC-LINK-02]), NIC registers ([SPEC-LINK-07])
+   5. [ ] Channel mux, credits, `INT_n` ([SPEC-LINK-03..05])
+   6. [ ] AXI4-Lite crossbar ([SPEC-AXI-03]), DMA engine and rings ([SPEC-DMA-01/02])
+   7. [ ] Event FIFO ([SPEC-TRC-01]) and host CTF conversion ([SPEC-TRC-02])
+   8. [ ] Python host driver with SPI-pins and direct back ends ([SPEC-LINK-06])
 2. [ ] Debugger M1: Verilator model library, `.vlt` public signals, `Session`, CLI ([SPEC-DBG-01..03, 09])
 3. [ ] Debugger M2+: GUI with a modern theme, parts canvas ([SPEC-DBG-10], [SPEC-DBG-15]), then M3-M7
 4. [ ] Tang boards in pio2 ([SPEC-ICN-12]): pio2-native tops (SPI link + core + PIO), DShot / ESC serial /
    UART as PIO programs, pin mux ([SPEC-PIO-09]); then remove the Tang boards (9K, Nano 20K, Primer
    20K) from AbstractX
-5. [ ] Zynq host adapter ([SPEC-ICN-11]): AXI4-Lite to Wishbone, AXI-Stream ring ports, Zynq driver back end
+5. [ ] Zynq ([SPEC-ICN-11]): PS GP port as second AXI4-Lite master, PS AXI DMA on the ring AXIS ports, Zynq driver back end
 6. [ ] AbstractX: wrapper that adds the TLP adapters around the pio2 tile; its TLP-path test moves back
 7. [ ] Evidence ledger for pio2 (trac.py records) so the matrix can show VERIFIED
 8. [ ] Wiki / tutorials and demos (how the PIO works, debugger walkthroughs) once the debugger runs
 
+## Decisions
+
+* 2026-10-29: AXI4-Lite (registers) and AXI-Stream (data) everywhere in pio2, including the tile's register
+  port; no Wishbone, no TLP ([SPEC-AXI-01..04]). Reasons: native on the Zynq, proven verification tools
+  (ZipCPU formal properties, cocotbext-axi, pyuvm). AbstractX bridges in its own wrapper.
+* 2026-10-29: the SPI link is the throughput limit, not the bus (AXI-Stream ~108 MB/s at 27 MHz), so the
+  PHY is SCK-clocked with an async FIFO, goal >= 10 MB/s on Dual SPI ([SPEC-LINK-01]).
+* 2026-10-29: full validation ([SPEC-VER-01]): formal on every bus port, UVM-style pyuvm testbenches,
+  functional coverage closure per block.
+
 ## Open questions
 
-* **Internal bus**: Wishbone B4 (as specified now) or AXI4-Lite for registers + AXI-Stream for data
-  (owner considering, 2026-10-29). Decide before the interconnect RTL; the spec changes first.
 
 * Debugger GUI: imgui-bundle with a custom theme first, web/Tauri front end later if needed.
 * Tang Primer 20K: move with the other Tang boards (assumed yes).

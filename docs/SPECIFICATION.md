@@ -148,8 +148,11 @@ flowchart TD
 * **Implementation Target**: `src/rtl/asp_pio_tlp_shim.sv`, `src/rtl/asp_pio_tile.sv`
 * **Verified by**: `cocotb-regression`
 
-### `[SPEC-PIO-05]` Wishbone B4 Slave Bus Interface & Register Map
-* **Requirement**: The PIO tile MUST expose a standard Wishbone B4 pipelined slave interface at base address `0x40000700`:
+### `[SPEC-PIO-05]` Register Map (Bus: AXI4-Lite, [SPEC-AXI-04])
+* **Bus (2026-10-29)**: this register map moves unchanged from the Wishbone port to an AXI4-Lite slave
+  port (`[SPEC-AXI-04]` in `docs/INTERCONNECT_SPECIFICATION.md`); pio2 has no Wishbone. Until that
+  change lands the RTL and tests still use the Wishbone port described here.
+* **Requirement**: The PIO tile MUST expose this register map, at base address `0x40000700` in AbstractX:
   * `0x00`: Tile Control & Status (`ENABLE[3:0]`, `RESTART[3:0]`).
   * `0x04`: Internal IRQ Status & Clear.
   * `0x08`: FIFO status (read): RX empty `[31:28]`, TX full `[27:24]`.
