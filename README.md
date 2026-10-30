@@ -76,6 +76,34 @@ CTF. The simulator runs the same RTL behind the same driver, so a program debugg
 runs unchanged on a board. Detailed diagrams of each part: [`docs/overview.md`](docs/overview.md).
 Most of the interconnect is still specified, not built: see [Status](#status) and [`TODO.md`](TODO.md).
 
+## The simulator / debugger (first version)
+
+The real tile RTL, compiled by Verilator, behind a GUI: load a program, run or single-step it by
+clock or by instruction, watch every state machine's registers and FIFOs, the pins, and parts wired
+to them.
+
+```bash
+uv sync --extra gui
+uv run --extra gui pio2-gui                         # Blink; pick other examples in the toolbar
+uv run --extra gui pio2-gui --example "UART TX"
+uv run pio2-debug --example "UART TX" --clocks 20000    # the same session headless
+```
+
+| Button to LED (one `mov pins, ~pins`) | UART TX into the terminal |
+| :---: | :---: |
+| ![button](docs/images/gui-button.png) | ![uart](docs/images/gui-uart.png) |
+
+| Bidirectional DShot: driven (teal) and released (grey) in the logic analyzer |
+| :---: |
+| ![dshot](docs/images/gui-dshot.png) |
+
+Built so far (milestones in [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md)):
+`libpio2sim.so` (unmodified RTL, signals read through VPI by name, every clock recorded), the
+`pio2.debug.Session` engine (13 pytest tests), program listing with per-SM PC markers, SM state and
+FIFOs, IRQ flags, a parts canvas (LED, push button, UART terminal), a logic analyzer with a PC
+timeline, run / pause / step clock / step instruction, and four examples (Blink, UART TX, Button to
+LED, DShot). Not yet: breakpoints, reverse step, FST / CTF export, saved layouts, more parts.
+
 ## Direction
 
 * **pio2 is the simulation home of the PIO.** Every way of running a PIO program without silicon

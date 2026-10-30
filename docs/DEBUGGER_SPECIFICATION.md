@@ -58,6 +58,13 @@ flowchart TB
 * **Requirement**: the debugger simulates `src/rtl/asp_pio_tile.sv` with Verilator, unmodified. Internal
   state is made readable with a Verilator configuration file (`public_flat_rd` per signal), never by
   editing the RTL for the debugger.
+* **Requirement (state access, 2026-10-29)**: signals are read through VPI by hierarchical name
+  (`asp_pio_tile.gen_sm[0].u_sm.pc`), so the Python side names what it shows and a renamed RTL
+  signal fails loudly at session start, not silently in the GUI.
+* **Requirement (pads)**: the model closes the pad loop as a board top does: each clock
+  `i_gpio = (out & dir) | (ext & ~dir)`, where `ext` is what the parts drive and undriven lines read
+  the configured pull (default high). A batch run records `out`, `dir`, `i_gpio` and every SM's PC
+  and stall flag per clock, so parts and views work on whole batches instead of one call per clock.
 * **Requirement**: `libpio2sim.so` exports a C ABI: create/destroy, reset, AXI4-Lite register read/write, AXI-Stream FIFO push/pop, set input
   pins, read pin outputs and directions, step N clocks, read per-SM state, save/restore a snapshot,
   open/close an FST trace.
@@ -212,8 +219,8 @@ flowchart TB
 | M | Content | Done when |
 | :--- | :--- | :--- |
 | M0 | split from AbstractX: RTL, programs, tests, uv project | cocotb 39/39 in this repo (done 2026-10-29) |
-| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session` (sim back end, TLP64 control); CLI step/run | pytest: conformance programs stepped by clock match cocotb |
-| M2 | GUI: controls, source, SM state, FIFOs; parts canvas with LED, button, terminal ([SPEC-DBG-15]) | blink drives an LED, uart_tx prints in the terminal, while stepping |
+| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session` (sim back end, AXI4-Lite registers); CLI step/run | pytest: conformance programs stepped by clock match cocotb (2026-10-29: Session, CLI and 13 tests done; the conformance-vs-cocotb comparison is not done yet) |
+| M2 | GUI: controls, source, SM state, FIFOs; parts canvas with LED, button, terminal ([SPEC-DBG-15]) | blink drives an LED, uart_tx prints in the terminal, while stepping (2026-10-29: done, screenshots in `docs/images/`; layout saving not yet) |
 | M3 | logic analyzer, timeline, FST/JSON export | DShot frame measured between cursors |
 | M4 | breakpoints/watchpoints, reverse step | reverse-step test bit-identical |
 | M5 | stimulus generators, example sessions ([SPEC-DBG-11]) | ESC serial, DShot reply and the IMU auto-DMA session run from the GUI and headless |

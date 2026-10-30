@@ -77,3 +77,30 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Docs**: `docs/overview.md` with six Mermaid diagrams (system, SPI adapter, Zynq adapter, core, pin
   mapping per state machine, trace path); every ASCII diagram in the repo replaced by Mermaid.
 * **Not verified**: the Mermaid diagrams were not rendered here (no Mermaid CLI); check on GitHub.
+
+## 2026-10-29: Debugger M1 / M2: Verilator model, Session, GUI
+
+* **Category**: `product-bug` (debugger, caught before merge), `tool-bug` (environment)
+* **What**: `libpio2sim.so` (Verilator `--vpi`, `.vlt` `public_flat_rd`, C ABI in
+  `src/pio2/debug/sim/pio2sim.cpp`), `pio2.debug.Session`, `pio2-debug` CLI, `pio2-gui`
+  (imgui-bundle, ImPlot), parts (LED, button, UART terminal), four example sessions.
+* **Found 1**: register accesses clock the model, but those clocks were not recorded, so the trace had
+  gaps and the UART terminal decoded garbage whenever the feed wrote the TX FIFO mid-character. Every
+  clock is now queued in the C model and drained into the trace (`test_trace_has_no_gaps`).
+* **Found 2**: `step_instr` checked "SM enabled" with an AXI register read, which itself runs 3+
+  clocks, so one "instruction step" ran several instructions and a test waiting for a PC could loop
+  forever. It now reads `sm_en` through VPI; `test_step_instr_runs_one_clock_at_divider_1` fails on
+  the old code (2 tests fail) and passes on the new. The GUI's single-step buttons no longer run the
+  stimulus feed, so "Step clock" is exactly one clock.
+* **Found 3**: `Session.pull` was both an attribute (pad pull level) and the RX FIFO read method.
+* **Found 4 (test)**: the first stalled-`pull` test expected the PC to stay at 0 after `push`; the
+  push's own register-write clocks let the pull complete. The test now steps a stalled SM with a
+  bounded limit instead.
+* **Tool facts**: ImGui 1.92 `add_rect(p_min, p_max, col, rounding, thickness, flags)` (argument order
+  changed); `implot.plot_digital` drew nothing in imgui-bundle 1.93 here, so the logic analyzer uses
+  stair lanes; hello_imgui writes `<title>.ini` in the working directory and it overrides the coded
+  docking layout (now `ini_disable`); a window that is not visible renders at about 1 frame per second
+  under this compositor, so screenshots use `--warmup` instead of many frames.
+* **Evidence**: `pytest tests/test_debug_session.py` 13 passed; screenshots `docs/images/gui-*.png`.
+* **Not verified**: the debugger's per-clock state against the cocotb conformance runs; the GUI on
+  another desktop / X11; interactive use (only scripted screenshots were taken here).

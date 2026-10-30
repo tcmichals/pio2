@@ -10,13 +10,15 @@ requires-python = ">=3.11,<3.14"
 dependencies = []
 
 [project.optional-dependencies]
-gui = ["imgui-bundle>=1.92"]
+gui = ["imgui-bundle>=1.92", "numpy>=1.26"]
 
 [project.scripts]
 pio2-programs = "pio2.programs:main"
 pio2-examples = "pio2.examples:main"
 pio2-setup-tools = "pio2.setup_tools:main"
 pio2-cocotb = "pio2.run_cocotb:main"
+pio2-gui = "pio2.gui.app:main"
+pio2-debug = "pio2.debug.cli:main"
 
 [dependency-groups]
 dev = [

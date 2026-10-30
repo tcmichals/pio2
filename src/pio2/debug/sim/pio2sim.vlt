@@ -1,0 +1,8 @@
+`verilator_config
+// Debugger view of the unmodified RTL ([SPEC-DBG-01]): every signal readable through VPI.
+// @impl [SPEC-DBG-01] docs/DEBUGGER_SPECIFICATION.md
+public_flat_rd -module "asp_pio_tile" -var "*"
+public_flat_rd -module "asp_pio_sm" -var "*"
+lint_off -rule WIDTHEXPAND
+lint_off -rule WIDTHTRUNC
+lint_off -rule SELRANGE

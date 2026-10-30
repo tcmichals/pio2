@@ -12,7 +12,7 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Python package (uv) | `pio2-programs`, `pio2-examples`, `pio2-setup-tools`, `pio2-cocotb` |
 | SpecTrace format | done: 45 requirements, 0 broken / drift / unbacked; skills in `.agents/skills` |
 | Interconnect (link, AXI4-Lite / AXI-Stream, DMA, trace, host adapters) | tile AXI4-Lite port and event FIFO built; the rest **specified only** |
-| Debugger / simulator / GUI | **specified only** (milestones M1-M7) |
+| Debugger / simulator / GUI | M1 and M2 working (`pio2-gui`, `pio2-debug`); M3-M7 specified |
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
 
@@ -38,8 +38,11 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
    7. [x] Event FIFO ([SPEC-TRC-01]): Forencich `axis_fifo`, slots, priority, drop and count; 5 tests,
       2 mutants caught. [ ] DMA trace channel into ring 1 and host CTF conversion ([SPEC-TRC-02])
    8. [ ] Python host driver with SPI-pins and direct back ends ([SPEC-LINK-06])
-2. [ ] Debugger M1: Verilator model library, `.vlt` public signals, `Session`, CLI ([SPEC-DBG-01..03, 09])
-3. [ ] Debugger M2+: GUI with a modern theme, parts canvas ([SPEC-DBG-10], [SPEC-DBG-15]), then M3-M7
+2. [x] Debugger M1: `libpio2sim.so` (Verilator + VPI), `Session`, `pio2-debug` CLI, 13 pytest tests ([SPEC-DBG-01..03, 09]);
+   [ ] conformance programs stepped in the debugger vs the cocotb results
+3. [x] Debugger M2: `pio2-gui` (imgui-bundle): program listing, SM state, FIFOs, IRQs, parts canvas (LED,
+   button, UART terminal), logic analyzer + PC timeline, run / step clock / step instruction, 4 examples.
+   [ ] M3-M7: breakpoints, reverse step, FST / CTF export, saved layout, more parts, diff mode, board back end
 4. [ ] Tang boards in pio2 ([SPEC-ICN-12]): pio2-native tops (SPI link + core + PIO), DShot / ESC serial /
    UART as PIO programs, pin mux ([SPEC-PIO-09]); then remove the Tang boards (9K, Nano 20K, Primer
    20K) from AbstractX
