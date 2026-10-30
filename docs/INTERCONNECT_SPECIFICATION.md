@@ -25,8 +25,8 @@ The block diagrams (whole FPGA, host link, tile and DMA, trace path) are kept in
 [`overview.md`](overview.md). This section keeps the trace sequence, because it is the
 contract between `[SPEC-TRC-01]`, `[SPEC-TRC-02]` and `[SPEC-LINK-08]`.
 
-On the Zynq the SPI link is not built: the PS GP port drives the core's AXI4-Lite slave, the AXI MCDMA
-takes the core's stream output (trace and rings, channel in `TDEST`) into DDR, and the interrupt is a
+On the Zynq the SPI link is not built: the PS GP port drives the core's AXI4-Lite slave, pio2's own ring DMA
+(`pio2_ring_dma`, no vendor IP) takes the core's stream output (trace and rings, channel in `TDEST`) into DDR rings over HP0, and the interrupt is a
 PL-to-PS line (`[SPEC-ICN-11]`).
 
 ### How the trace reaches the host
@@ -363,7 +363,7 @@ AXI4-Lite crossbar, like every other block.
   channel (`[SPEC-DMA-01]`) in `RING` mode, which moves the records into ring 1. Ring 1 is the
   channel-1 out stream: on the SPI link it reaches the host through the outbound arbiter
   (`[SPEC-LINK-08]`), up to 14 records (112 bytes) per `STREAM_DATA` frame; on the Zynq through
-  the core's stream output and the AXI MCDMA (`[SPEC-ICN-11]`). It offers a frame when full or after its flush
+  the core's stream output and pio2's ring DMA (`[SPEC-ICN-11]`). It offers a frame when full or after its flush
   time, so a quiet trace still reaches the host. There is no separate trace packer.
 * **Rationale**: one path for SPI and Zynq; the ring gives deep buffering (BRAM) in front of a slow
   link; levels, thresholds, interrupts and counters are the ones every stream already has.
@@ -413,15 +413,28 @@ AXI4-Lite crossbar, like every other block.
 * **Requirement (SPI adapter)**: PHY, framers, CRC32, an AXI4-Lite master for channel 0, and the
   frame / block conversion (channel in the frame header <-> `TDEST`); it puts channel-0 replies first
   (`[SPEC-LINK-08]`) and drives `INT_n` from the interrupt.
-* **Requirement (Zynq adapter)**: no pio2 RTL. The PS GP port reaches the AXI4-Lite slave through the
-  Xilinx AXI interconnect / protocol converter; the Xilinx AXI MCDMA (one DMA channel per pio2 channel,
-  routed by `TDEST`) connects the two streams to DDR through an HP port; the interrupt goes to
-  `IRQ_F2P`.
-* **Requirement**: the host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap
-  for the registers, a DMA buffer for the streams) with the same channel API.
+* **Requirement (Zynq adapter, project owner 2026-10-30: no vendor IP, no kernel driver)**: the adapter
+  is pio2 RTL (`pio2_zynq_adapter`), with no Xilinx IP blocks (replaces the earlier AXI MCDMA plan):
+  1. **Registers**: PS `M_AXI_GP0` (AXI3) -> Forencich `axi_axil_adapter` (`third_party/verilog-axi`)
+     -> the core's AXI4-Lite slave.
+  2. **Streams**: `pio2_ring_dma`, an AXI master on `S_AXI_HP0` with one ring in DDR per channel and
+     direction, fixed-size slots, no descriptors. Out (PL -> PS, channels 1..9): each `TLAST` block
+     from the core's output stream goes into the next slot of the ring chosen by `TDEST`, then the
+     ring's hardware head advances and its `ISR` bit is set; a full ring holds `TREADY` low (the core's
+     rings keep their own drop-and-count rule). In (PS -> PL, channels 2..9): the host writes a slot
+     and advances the software tail; the adapter reads it and sends one `TLAST` block with that
+     `TDEST`. Per ring: base, slot count, head, tail registers in an adapter window of the
+     AXI4-Lite map.
+  3. **Interrupt**: the adapter's ring bits and the core's interrupt combine into one `IRQ_F2P[0]`;
+     one `ISR` / `IMR` read tells the driver every pending source.
+  4. **Memory**: one `reserved-memory` carveout (`no-map`) holds all rings; `S_AXI_HP0` is not
+     cache-coherent, so the host maps the carveout uncached through `generic-uio`.
+* **Requirement**: the host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (one
+  `generic-uio` device: map 0 the registers, map 1 the ring carveout, its fd the interrupt) with the
+  same channel API.
 * **Verified by**: `cocotb-regression` (the core through its boundary with each adapter's traffic pattern), `board-bringup`
   (Zynq: registers and one stream through the PS)
-* **Implementation Target**: `src/rtl/pio2_core.sv`, `src/pio2/host/zynq.py`
+* **Implementation Target**: `src/rtl/pio2_core.sv`, `src/rtl/pio2_zynq_adapter.sv`, `src/rtl/pio2_ring_dma.sv`, `src/pio2/host/zynq.py`
 
 ### `[SPEC-ICN-12]` On the Tang Boards the PIO Replaces the Hardwired Cores
 * **Goal (project owner, 2026-10-29)**: DShot, bidirectional DShot, ESC serial passthrough and UART are
