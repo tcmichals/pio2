@@ -18,6 +18,9 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 
 ## Next
 
+0. [x] Every RP2040 opcode / operand checked on the RTL (`tests/test_isa_every_opcode.py`, 384 cases, coverage
+   test, 3 mutants caught). [ ] Same cases as a cocotb suite on Icarus as a second simulator.
+
 1. [ ] Interconnect RTL, in order, each with formal + UVM-style cocotb + coverage ([SPEC-VER-01]):
    1. [x] Verification base: uv deps (cocotbext-axi, pyuvm, cocotb-coverage); ZipCPU property files from
       the `third_party/wb2axip` submodule; [x] first formal .sby (tile AXI4-Lite port, faxil_slave): BMC

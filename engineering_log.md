@@ -104,3 +104,20 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Evidence**: `pytest tests/test_debug_session.py` 13 passed; screenshots `docs/images/gui-*.png`.
 * **Not verified**: the debugger's per-clock state against the cocotb conformance runs; the GUI on
   another desktop / X11; interactive use (only scripted screenshots were taken here).
+
+## 2026-10-29: Every RP2040 opcode and operand checked on the RTL; built-in assembler
+
+* **Category**: `process-gap` (verification), `false-alarm` (test expectations)
+* **What**: `tests/test_isa_every_opcode.py` (project owner: "we need all the opcode checks"): 384 cases
+  over JMP (8 conditions), SET (4 destinations), MOV (7 destinations x 3 ops x 7 sources), IN (6
+  sources, counts, both shift directions), OUT (8 destinations incl. PC and EXEC), PUSH / PULL (all
+  option combinations), WAIT (gpio, pin, irq, both polarities, rel), IRQ (set, nowait, clear, wait,
+  rel), side-set (opt, pindirs) and delay, on the Verilator model, each compared with the datasheet
+  rule. A last test fails if any combination has no passing case. Instructions are encoded by the new
+  `pio2.asm`, which re-assembles all 30 checked-in pioasm images identically.
+* **Mutants**: `jmp x!=y` inverted (6 failures), `mov status` off by one (7), `mov ::` not reversing (35).
+* **False alarms (test)**: not-taken `jmp` through `SMx_INSTR` leaves the PC alone (the instruction is not
+  from memory, as `pio_sm_exec` relies on); `mov exec` / `out exec` run the built instruction on the SM's
+  next cycle, so those cases run in an enabled program.
+* **Not verified**: the same cases under cocotb / Icarus (a second simulator); RP2350-only features
+  (not a goal, project owner 2026-10-29).

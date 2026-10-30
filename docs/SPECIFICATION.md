@@ -128,7 +128,10 @@ flowchart TD
      machine that writes it in that clock is applied (side-set beats OUT/SET within one SM); a pin
      no state machine writes keeps its value. After reset every pin is an input with output 0.
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_conformance_cocotb.py`: each rule
-  above with `pioasm` output; first failing case on 2026-10-27: `pull block` advanced the PC)
+  above with `pioasm` output; first failing case on 2026-10-27: `pull block` advanced the PC), `host-tests`
+  (`tests/test_isa_every_opcode.py`, 2026-10-29: every RP2040 opcode and operand executed on the
+  Verilator model of the RTL and compared with the datasheet rule; a coverage test fails if any
+  combination has no case; three RTL mutants caught)
 * **Implementation Target**: `src/rtl/asp_pio_sm.sv`
 
 ### `[SPEC-PIO-03]` Internal IRQ Bus & Supervisor/Worker State Machine Chaining
