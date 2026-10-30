@@ -1,6 +1,6 @@
 # pio2 TODO and Status
 
-Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SPECIFICATION.md`,
+Updated 2026-10-30. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SPECIFICATION.md`,
 `docs/DEBUGGER_SPECIFICATION.md`. Lessons: `engineering_log.md`.
 
 ## Where we are
@@ -15,6 +15,61 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Debugger / simulator / GUI | M1 and M2 working (`pio2-gui`, `pio2-debug`); M3-M7 specified |
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
+
+## Pick up here (handoff 2026-10-30, session stopped by the project owner)
+
+State of `main` (not pushed): tile split, DMA + rings + crossbar + core registers, Icarus as second
+simulator, k-induction on both AXI4-Lite front ends are committed. Verilator: 11/11 cocotb suites
+(including the 384-case ISA suite), pytest 442 passed. The Icarus run of the merged tree did not finish
+before the stop: re-run `uv run pio2-cocotb --sim icarus` (the new pio2_core suites have never run on
+Icarus).
+
+Unmerged work, in branches (each has its own commits and a report in its last commit messages):
+* `worktree-agent-a1f543a2c9553e1ee`: **finished, merge next**. `src/pio2/host/frame.py` (link frames,
+  CRC32), `src/pio2/trace/ctf.py` + `barectf_config.yaml` (CTF, read back by babeltrace2), `pio2-trac`
+  evidence ledger (TODO item 7). Expect conflicts in engineering_log.md (append both) and in the
+  spec text it asked for (op-code table is already in [SPEC-LINK-02]; add [SPEC-VER-02] "evidence
+  ledger", point [SPEC-TRC-02] Verified-by at tests/test_trace_ctf.py, align [SPEC-DBG-13]). After the
+  merge re-run `uv run pio2-trac --record --formal --lint` on a clean tree and commit the ledger.
+* `worktree-agent-aa5ce2bdeac89fae2`: debugger M3-M7, ESC examples, conformance in the debugger
+  (TODO items 2, 3). **Stopped mid-work**: only its first commit (7908888, conformance programs in the
+  debugger) is on the branch; uncommitted work may be in `.claude/worktrees/agent-aa5ce2bdeac89fae2/`.
+  It was written against the OLD pio2_core (trace port); when merging, Session's trace now comes from
+  channel 1 of the core's output stream (`pio2sim.cpp`, `session.py` on main).
+
+Uncommitted-then-committed draft (this commit): **SPI link RTL, untested, not in any build**
+* `src/rtl/link/pio2_spi_phy.sv` (SCK domain, two frame buffers per direction, handover while CS_n
+  high) and `src/rtl/link/pio2_link.sv` (frame check, CRC32, REG_READ/WRITE/STATUS/STREAM_DATA, credit
+  check, stream frames out, link registers, INT_n). Never compiled. Known weak spots to review first:
+  the reply byte writer (`put` / `put_idx` / `wcrc` updates in S_PUT_WORD), the REG_READ count path
+  in S_RD_BUS, `stream_chan` declared after use, and the stream writer sharing the tx write port.
+* The spec for it is done and committed ([SPEC-LINK-01..08], 2026-10-30): wire format, ops and NAK
+  codes, STATUS layout, link registers at 0x3100, CS timing rules.
+
+Next steps, in order:
+1. Merge `worktree-agent-a1f543a2c9553e1ee` (above).
+2. SPI link: lint and fix the two drafts; `src/rtl/link/pio2_spi_top.sv` (pio2_spi_phy + pio2_link +
+   pio2_core, pins as _i/_o/_oe); add to a file list; `tests/cocotb/test_link_cocotb.py` with an SPI
+   host model (single and dual, SCK slower and faster than f_sys, short read resent, bad CRC, credit
+   NAK, every op, INT_n); formal faxil_master on the link's AXI4-Lite master.
+3. `src/pio2/host/driver.py` ([SPEC-LINK-06]): one channel API, back ends: SPI pins (a Verilator model
+   of pio2_spi_top, new small C wrapper like pio2sim.cpp), direct (Session.stream_push/stream_out +
+   register calls), Zynq (`src/pio2/host/zynq.py`, UIO mmap; test with a file-backed fake).
+   `tests/test_host_driver.py`: same results through pins and direct.
+4. Debugger: merge the M3-M7 branch (or redo what is missing), then the IMU auto-DMA session on the
+   new core (program `src/programs/imu_spi_burst.pio`, IMU model as in test_pio2_core_cocotb.py).
+5. Tang tops (item 4): `boards/tang_nano9k`, `boards/tang_nano20k` with pio2_spi_top, pins.toml pin
+   maps; synthesize with yosys `synth_gowin` + nextpnr-himbaechel + gowin_pack (all in oss-cad-suite);
+   record LUT/FF/BRAM and Fmax ([SPEC-ICN-12], fpga-fit). No board here: board-bringup stays unverified.
+6. AbstractX (item 6): move `asp_pio_tlp_ingress.sv` / `asp_pio_tlp_shim.sv` (from pio2 history, commit
+   aca5ae5) into AbstractX `rtl/pio_tlp/`, wrap them around the new tile stream ports in
+   `asp_pio_wrap`, serve OUT_CFG/OUT_TIMEOUT/IN_CFG/IN_STATUS/SMx+0x1C there, move
+   test_asp_pio_tlp_path_cocotb.py + the old TLP packetizer test there, bump the submodule; then remove
+   the Tang boards from AbstractX. Commit in AbstractX (no push).
+7. Zynq (item 5): Vivado block-design Tcl (cannot be run here: no Vivado), Zynq driver back end.
+8. Formal on the AXI-Stream ports (faxis_master/slave) of pio2_dma / pio2_core; pyuvm environments
+   ([SPEC-VER-01]) are not written yet: the new suites are directed + randomized cocotb, not pyuvm.
+9. Docs: rewrite docs/architecture.md (still describes the AbstractX-era tile), tutorials (item 8).
 
 ## Next
 

@@ -160,10 +160,30 @@ AXI4-Lite crossbar, like every other block.
   rest of the window: single (MOSI = IO0, MISO = IO1) or dual (IO0 and IO1 both carry data, 2 bits
   per clock; one turnaround clock before the FPGA drives). The FPGA returns the low byte of `ISR`
   during the command byte, so every window also tells the host what is pending.
-* **Requirement (clocking, 2026-10-29)**: SCK clocks the PHY's shift registers directly (its own clock
-  domain); bytes cross to the system clock through a small asynchronous FIFO (Gray-coded pointers,
-  2-flop synchronisers), never by sampling SCK with the system clock. SCK is independent of f_sys,
-  limited only by the pins and the board wiring.
+* **Requirement (clocking, 2026-10-29; handover revised 2026-10-30)**: SCK clocks the PHY's shift
+  registers directly (its own clock domain), never sampled by the system clock; SCK is independent of
+  f_sys, limited only by the pins and the board wiring. Bytes cross between the domains in **frame
+  buffers** (two per direction, `[SPEC-LINK-07]`): during a window the SCK domain writes the bytes of a
+  received frame into one buffer, or reads the bytes of the frame to send from one; the system domain
+  hands buffers over only while CS_n is high. The only synchronised signals are CS_n and a toggle per
+  window (2-flop synchronisers); every multi-bit value that crosses is stable while it is read (written
+  by one side only while the other side cannot look at it). So a frame never crosses half written, and
+  no asynchronous FIFO is needed.
+* **Requirement (host timing in system clocks)**: CS_n low to the first SCK rising edge >= 3 f_sys
+  clocks; CS_n high between windows >= 8 f_sys clocks; SCK idles low and does not toggle while CS_n is
+  high.
+* **Requirement (wire, 2026-10-30)**: bits MSB first. Single: the host drives IO0, the FPGA drives IO1
+  for the whole window (the command byte, then data or zeros); each side samples on the SCK rising edge
+  and changes after the falling edge. Dual (like SPI flash dual I/O): two bits per clock, IO1 the higher
+  of each pair (7, 5, 3, 1), IO0 the lower; for `READ_FRAME` one turnaround clock follows the command
+  byte (nobody drives), then the FPGA drives both lines. The `ISR` byte sent during the command byte is
+  the link's `ISR` (`[SPEC-LINK-07]`), taken while CS_n was high.
+* **Requirement (windows)**: `WRITE_FRAME`: the host sends exactly one frame; bytes beyond 128 are
+  ignored and a frame that is cut short fails its length or CRC check. `READ_FRAME`: the FPGA sends the
+  next frame to the host (channel-0 replies first, `[SPEC-LINK-08]`), then zeros; with no frame queued
+  every byte is 0 (an `op` of 0 means "no frame"). The host reads the 8-byte header and then the rest of
+  the frame in the same window. A frame counts as delivered only when the window read all of it; a
+  window that ends early leaves it queued, so the next `READ_FRAME` sends it again (same `seq`).
 * **Requirement (throughput)**: at least **10 MB/s of payload** on Dual SPI (about 50 MHz SCK: 100 Mbit/s
   raw, ~11 MB/s after the 12-byte header and CRC per 128-byte frame), sustained in both directions on a
   Tang Nano 20K, with the host and wiring stated. Single SPI gives half. Quad SPI is a later option if
@@ -173,8 +193,10 @@ AXI4-Lite crossbar, like every other block.
   ~108 MB/s).
 * **Requirement**: pins as separate `_i`, `_o`, `_oe` signals at the IP boundary; tristate only in
   the board top (the same rule the PIO pins follow).
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_phy_cocotb.py`: single and dual, SCK unrelated to and faster than f_sys, async FIFO under randomized clock ratios), `formal-check` (async FIFO pointers), `board-bringup` (10 MB/s measured, SCK limit per board)
-* **Implementation Target**: `src/rtl/link/pio2_spi_phy.sv`, `src/rtl/link/pio2_async_fifo.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: single and dual, SCK
+  unrelated to f_sys (slower and faster), randomized clock ratios, short read windows resent),
+  `board-bringup` (10 MB/s measured, SCK limit per board)
+* **Implementation Target**: `src/rtl/link/pio2_spi_phy.sv`
 
 ### `[SPEC-LINK-02]` Frames: At Most 128 Bytes, CRC32, Like a NIC
 * **Requirement**: the link carries **frames** of at most 128 bytes, framed by CS_n. A framer on each
@@ -197,16 +219,30 @@ AXI4-Lite crossbar, like every other block.
 
   So a frame carries at most 116 bytes (29 words) of payload with no address, 112 bytes (28 words)
   with one; larger transfers are several frames.
-* **Requirement (ops)**: `REG_READ`, `REG_WRITE` (channel 0, incrementing or constant address),
-  `STREAM_DATA` (a stream channel's payload, either direction), `STATUS` (no payload; the reply
-  carries ISR, queue levels and per-channel credits), `ACK` / `NAK` (reply to a write, with the
-  `seq` and an error code).
+* **Requirement (ops, codes 2026-10-30)**:
+
+  | Code | Op | Request payload | Reply |
+  | :--- | :--- | :--- | :--- |
+  | `0x01` | `REG_READ` | one u32: words to read, 1..28 | `REG_READ`, same `seq` and `addr`, the words |
+  | `0x02` | `REG_WRITE` | the words to write, 1..28 | `ACK` (one u32, 0) or `NAK` |
+  | `0x03` | `STREAM_DATA` | words, 1..29, channel 2..9 (to the host: channels 1..9) | none on success; `NAK` on an error |
+  | `0x04` | `STATUS` | none | `STATUS`: core `ISR`, link `ISR`, `{TXQ_LEVEL[15:8], RXQ_LEVEL[7:0]}`, then the DMA `LEVEL` register (`{free, level}`) of channels 1..9: 12 words |
+  | `0x05` | `ACK` | | one u32, 0 |
+  | `0x06` | `NAK` | | one u32 error code: 1 bad op, 2 bad channel, 3 bus error (`resp << 8` added), 4 no credit, 5 bad length |
+
+  `addr` is present exactly for `REG_READ` / `REG_WRITE`, which use channel 0; `STREAM_DATA` never
+  uses channel 0. `reserved` must be 0 and flag bits 2..7 are reserved. `len` is a multiple of 4.
+  Addresses `0x3100..0x31FF` are the link's own registers (`[SPEC-LINK-07]`); every other address is a
+  transaction on the core's AXI4-Lite slave. Replies carry channel 0 and echo the request's `seq`;
+  frames to the host on channels 1..9 number their `seq` per link (wrapping).
 * **Requirement (transactions)**: the SPI master always drives the clock, so a transaction is: host
   writes one frame (command), the FPGA queues the reply frame, the host reads it in a later CS_n
   window (signalled by `INT_n` or by polling `STATUS`). Host-to-FPGA and FPGA-to-host frames use
   separate queues, so the host can write the next command while a reply is waiting.
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_framer_cocotb.py`: CRC32 known vectors, bad CRC dropped whole, 128-byte limit), `host-tests` (driver framing)
-* **Implementation Target**: `src/rtl/link/pio2_link_framer.sv`, `src/pio2/host/frame.py`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: bad CRC dropped whole and
+  counted, bad length, every op and NAK code), `host-tests` (`tests/test_host_frame.py`: CRC32 known
+  vectors, encode / decode, limits)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`, `src/rtl/link/pio2_crc32.sv`, `src/pio2/host/frame.py`
 
 ### `[SPEC-LINK-07]` NIC-Style Register Model
 * **Requirement**: the link block is controlled like a small NIC, through registers in the link
@@ -218,19 +254,24 @@ AXI4-Lite crossbar, like every other block.
 
   | Register | Meaning |
   | :--- | :--- |
-  | `ID` / `VERSION` | magic and protocol version, so the host checks it talks to the right IP |
-  | `CTRL` | enable, reset queues, SPI mode (dual allowed), `RD_WAIT` |
-  | `ISR` | interrupt status, write 1 to clear: RX frame ready, TX queue space, stream threshold, DMA done, DMA error, CRC error, overflow, trace dropped |
-  | `IMR` | interrupt mask; `INT_n` = any (`ISR` and `IMR`) |
-  | `TXQ_LEVEL` / `RXQ_LEVEL` | frames waiting in each direction |
-  | `RX_FRAME_LEN` / `RX_FRAME_CHAN` | header of the next reply frame, without consuming it |
-  | `CRC_ERR` / `LEN_ERR` / `OVERFLOW` / `DROPPED` | error counters (saturating, clear on write) |
-  | `STREAM_THR[n]` | per stream channel: interrupt threshold in words |
+  | Address | Register | Meaning |
+  | :--- | :--- | :--- |
+  | `0x3100` | `LINK_CTRL` | write 1 to bit 1: drop every queued frame; `[15:8]` frame buffers per direction (read) |
+  | `0x3104` | `LINK_ISR` | W1C: `RX_READY[0]` (a frame waits for `READ_FRAME`), `TX_SPACE[1]` (a buffer can take a `WRITE_FRAME`), `CORE[2]` (the core's interrupt, read only), `CRC_ERR[5]`, `OVERFLOW[6]` |
+  | `0x3108` | `LINK_IMR` | mask for `LINK_ISR` |
+  | `0x310C` | `TXQ_LEVEL` | frames waiting to go to the host |
+  | `0x3110` | `RXQ_LEVEL` | received frames not yet handled |
+  | `0x3114` | `RX_FRAME` | header of the next frame to the host, without taking it: `{chan[23:16], len[15:0]}` |
+  | `0x3118` .. `0x3124` | `CRC_ERR`, `LEN_ERR`, `OVERFLOW`, `DROPPED` | saturating counters, a write clears; `OVERFLOW` = a `WRITE_FRAME` with no free buffer or a stream frame beyond its credit, `DROPPED` = frames answered with `NAK` 1 / 2 / 5 |
 
-* **Requirement (frame buffers)**: at least two frame buffers per direction (128 bytes each) so the
-  host can stream back to back; buffer count is a build parameter and is reported in `CTRL`.
-* **Verified by**: `cocotb-regression` (register map read/write, counters saturate and clear)
-* **Implementation Target**: `src/rtl/link/pio2_link_regs.sv`
+  ID, version and the per-channel thresholds are the core's (`0x3000`, DMA `THR`).
+
+* **Requirement (frame buffers)**: two frame buffers per direction (128 bytes each) so the host can
+  stream back to back, reported in `LINK_CTRL`. Toward the host, one buffer holds channel-0 replies and
+  one holds stream frames (`[SPEC-LINK-08]`).
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: register map, counters
+  count and clear)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`
 
 ### `[SPEC-LINK-03]` Channels Are Ports
 * **Requirement**: channel numbers (frame `chan`): channel 0 = registers (addressed); channel 1 = trace stream (out, `[SPEC-TRC-*]`);
@@ -238,8 +279,9 @@ AXI4-Lite crossbar, like every other block.
   configuration. Unused channels answer with an error status.
 * **Requirement**: a stream channel never needs an address: like a socket, the host only says "give me
   up to N words" or "take these N words".
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_channels_cocotb.py`)
-* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: unused channels answer
+  `NAK` 2)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`
 
 ### `[SPEC-LINK-08]` Outbound Frames Are Merged Whole
 * **Requirement**: frames to the host come from channel 0 (register replies, `ACK` / `NAK`, `STATUS`),
@@ -253,16 +295,21 @@ AXI4-Lite crossbar, like every other block.
   frame when it has a full frame of words or, with fewer, after its flush time.
 * **Rationale**: whole frames keep each frame's CRC and `chan` meaningful; the reserved buffer keeps
   register access latency bounded while streams run at full rate.
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_channels_cocotb.py`: all channels busy
-  at once, every frame whole and in channel order, register reply latency bounded, round robin share)
-* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: streams and register
+  replies at once, every frame whole, a reply never waits behind stream frames)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`
 
 ### `[SPEC-LINK-04]` Flow Control by Credits
 * **Requirement**: the `STATUS` reply returns, per channel, words available (out) or words free (in). The host
   never sends more than the free count; the FPGA never returns more than it has. Neither side can
   overflow the other; an attempted overflow is a counted error, not data loss.
-* **Verified by**: `cocotb-regression` (credits never exceeded; overflow counted, no data loss)
-* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`, `src/pio2/host/driver.py`
+* **Requirement (2026-10-30)**: before a `STREAM_DATA` frame reaches the core, the link reads the
+  channel's free count (DMA `LEVEL`); a frame larger than that is answered `NAK` 4 and counted in
+  `OVERFLOW`, and nothing of it is written, so the host can send it again.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: frame beyond the credit
+  refused whole, counted, resent), `host-tests` (`tests/test_host_driver.py`: the driver never exceeds
+  the credit)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`, `src/pio2/host/driver.py`
 
 ### `[SPEC-LINK-05]` Interrupt Pin and Status
 * **Requirement**: `INT_n` (active low, level) = the core's interrupt or any bit of the link's (`ISR`
@@ -271,8 +318,9 @@ AXI4-Lite crossbar, like every other block.
   `STREAM_THR` free, a DMA channel done or in error, a link error, trace dropped. The host reads `ISR`
   (in the first byte of any window, or with `STATUS`), services the causes, and writes 1 to clear
   them; a cause that is still true sets its bit again, so no interrupt is lost.
-* **Verified by**: `cocotb-regression` (every ISR cause sets INT_n; W1C; a still-true cause re-asserts)
-* **Implementation Target**: `src/rtl/link/pio2_link_regs.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_cocotb.py`: each link cause and the
+  core's interrupt set INT_n; W1C; a still-true cause re-asserts)
+* **Implementation Target**: `src/rtl/link/pio2_link.sv`, `src/rtl/pio2_core_regs.sv`
 
 ### `[SPEC-LINK-06]` The Same Link in Simulation
 * **Requirement**: the simulator (`docs/DEBUGGER_SPECIFICATION.md`) can drive the link at the SPI pins (bit for bit
@@ -513,7 +561,8 @@ AXI4-Lite crossbar, like every other block.
   interrupt (`[SPEC-LINK-05]`).
 * **Requirement (SPI adapter)**: PHY, framers, CRC32, an AXI4-Lite master for channel 0, and the
   frame / block conversion (channel in the frame header <-> `TDEST`); it puts channel-0 replies first
-  (`[SPEC-LINK-08]`) and drives `INT_n` from the interrupt.
+  (`[SPEC-LINK-08]`) and drives `INT_n` from the interrupt. `pio2_spi_top` is the adapter and the core
+  together, with the SPI and PIO pins as `_i` / `_o` / `_oe`.
 * **Requirement (Zynq adapter)**: no pio2 RTL. The PS GP port reaches the AXI4-Lite slave through the
   Xilinx AXI interconnect / protocol converter; the Xilinx AXI MCDMA (one DMA channel per pio2 channel,
   routed by `TDEST`) connects the two streams to DDR through an HP port; the interrupt goes to
