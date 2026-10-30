@@ -164,3 +164,31 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   target"). `pio2.debug.build` now deletes `obj/` before each rebuild.
 * **Process gap**: `git stash` (like `git status` without `--ignore-submodules=all`) hangs on this disk
   because of the submodules; a hung stash had to be killed. Do not use it here.
+
+## 2026-10-30: k-induction closes on the tile's AXI4-Lite port [SPEC-AXI-04]
+
+* **Category**: `process-gap` (proof was bounded only), `false-alarm` (the 25-minute "slow" induction)
+* **What**: `tests/formal/pio_tile_axil.sv` gained five formal-only assertions (`ifdef FORMAL`), all on
+  the tile's ports, none in the RTL: faxil_slave's outstanding counters equal "held + response
+  pending", i.e. `f_awr == !AWREADY + BVALID`, `f_wr == !WREADY + BVALID`, `f_rd == !ARREADY + RVALID`
+  (the front end's `aw_held` / `w_held` / `ar_held` are exactly the inverted READY outputs), and the
+  responses are OKAY / SLVERR (B) and OKAY (R). No invariant on `req_busy` / `wb_ack_o` was needed:
+  an unreachable internal state turns into a violation of the port invariants within 3 clocks.
+* **Why the old run never finished**: without the invariants the solver keeps finding unreachable
+  starting states (e.g. `aw_held` set with no AW counted), so induction fails at every depth and each
+  step only gets slower; it was not a size problem. Shown: the same run with the five assertions
+  compiled out ends UNKNOWN after 7 min (induction counterexample from an unreachable state:
+  `faxil_slave.v:598`, read counter at its limit with ARREADY high). With them: `sby -f pio_tile_axil.sby prove`
+  PASS, induction closes at k = 8 (smtbmc yices, "Trying induction in step 32 .. Temporal induction
+  successful" at depth 40), whole design (all four SMs), 116 s wall, of which the induction takes ~5 s
+  and the base case (BMC 40) the rest.
+* **Depth raised 24 -> 40** for both tasks: faxil_slave holds reset for 16 clocks, so depth 24 left 8
+  clocks of traffic, too few for two reads in a row. Mutant "read starts while RVALID is pending"
+  (`read_ready = ar_held`) PASSED the depth-24 base case and only showed up as an induction
+  counterexample (UNKNOWN after 8 min); at depth 40 it FAILs the base case at step 25 in 30 s. Lesson:
+  check that the BMC depth minus the reset length covers two back-to-back transactions.
+* **Mutants (prove, depth 40)**: BVALID dropped without BREADY (`if (s_axil_bvalid) s_axil_bvalid <=
+  0`): FAIL, base case step 20, 42 s. Read issued while RVALID pending: FAIL, base case step 25, 30 s.
+  `bmc` depth 40 on the unmodified tile: PASS, 99 s.
+* **Not verified**: the AXI-Stream FIFO ports under `faxis_*` (not bound yet); liveness beyond
+  faxil_slave's 12-clock MAXDELAY / MAXWAIT bounds.
