@@ -139,3 +139,18 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   (no RX-full edges) fails `test_fifo_edges`.
 * **Not verified**: the tap and core under formal; the records through the DMA trace channel (no DMA
   yet); AbstractX lint with the new unconnected tile outputs (checked in the AbstractX commit).
+
+## 2026-10-30: Conformance programs stepped in the debugger against the cocotb results
+
+* **Category**: `process-gap` (verification), `false-alarm` (one test timing)
+* **What**: `tests/test_debug_conformance.py` runs every case of
+  `tests/cocotb/test_asp_pio_conformance_cocotb.py` through `pio2.debug.Session`, once with clocks in
+  batches and once stepped by instruction (`step_instr`), with the same register sequence, waits and
+  expected values. As in the cocotb bench every input line reads 0 (new `Session.set_pull(0)`).
+* **False alarm (test)**: the side-set case sampled pin 3 after the enable write returned and saw the
+  pin high for 2 clocks instead of 3. The per-clock trace shows 3: `Session.write` takes 5 clocks and
+  the first instruction runs inside them, later than cocotbext-axi's write returns. The test reads the
+  pin from the trace from the start of the write.
+* **Evidence**: `uv run pytest tests/test_debug_conformance.py -q`: 33 passed.
+* **Not verified**: the cases on a second simulator (Icarus); the comparison runs the same expectations,
+  not a recorded cocotb waveform.

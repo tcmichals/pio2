@@ -240,6 +240,11 @@ class Session:
             self.ext = (self.ext & ~(1 << pin)) | ((level & 1) << pin)
         self.lib.pio2sim_set_ext(self.h, self.ext, self.ext_mask, self.pull_level)
 
+    def set_pull(self, level_mask):
+        """Level each undriven line reads (bit n = line n; default all high, as with pull-ups)."""
+        self.pull_level = level_mask & 0xFFFF_FFFF
+        self.lib.pio2sim_set_ext(self.h, self.ext, self.ext_mask, self.pull_level)
+
     def pins(self):
         """(out, dir, in) of the 32 lines now."""
         return (self.lib.pio2sim_gpio_out(self.h), self.lib.pio2sim_gpio_dir(self.h),

@@ -87,7 +87,8 @@ flowchart TB
   run N cycles; run until a breakpoint; pause.
 * **Requirement**: "instruction retired" is derived from the exposed state (PC change, or same PC with
   the delay counter and stall cleared), and the rule is tested against the conformance programs.
-* **Verified by**: `host-tests` (`tests/test_debug_stepping.py`: conformance programs stepped by instruction)
+* **Verified by**: `host-tests` (`tests/test_debug_conformance.py`: conformance programs stepped by clock and by
+  instruction give the cocotb suite's results)
 * **Implementation Target**: `src/pio2/debug/session.py`
 
 ### `[SPEC-DBG-04]` Breakpoints and Watchpoints
@@ -236,7 +237,7 @@ flowchart TB
 | M | Content | Done when |
 | :--- | :--- | :--- |
 | M0 | split from AbstractX: RTL, programs, tests, uv project | cocotb 39/39 in this repo (done 2026-10-29) |
-| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session` (sim back end, AXI4-Lite registers); CLI step/run | pytest: conformance programs stepped by clock match cocotb (2026-10-29: Session, CLI and 13 tests done; the conformance-vs-cocotb comparison is not done yet) |
+| M1 | `libpio2sim.so` + `.vlt` public signals + ctypes `Session` (sim back end, AXI4-Lite registers); CLI step/run | pytest: conformance programs stepped by clock match cocotb (2026-10-29: Session, CLI and 13 tests done; 2026-10-30: every conformance case of the cocotb suite stepped by clock and by instruction, `tests/test_debug_conformance.py`) |
 | M2 | GUI: controls, source, SM state, FIFOs; parts canvas with LED, button, terminal ([SPEC-DBG-15]) | blink drives an LED, uart_tx prints in the terminal, while stepping (2026-10-29: done, screenshots in `docs/images/`; layout saving not yet) |
 | M3 | logic analyzer, timeline, FST/JSON export | DShot frame measured between cursors |
 | M4 | breakpoints/watchpoints, reverse step | reverse-step test bit-identical |
