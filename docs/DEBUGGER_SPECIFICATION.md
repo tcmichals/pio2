@@ -214,6 +214,23 @@ flowchart TB
 * **Verified by**: `host-tests` (`tests/test_parts.py`: each part model against its protocol)
 * **Implementation Target**: `src/pio2/gui/canvas.py`, `src/pio2/parts/`
 
+### `[SPEC-DBG-16]` Built-In Assembler and Editor
+* **Goal**: edit a program and run it at once, with nothing to install (the browser simulators do
+  this; pio2 must too, without giving up the real RTL).
+* **Requirement**: `pio2.asm` assembles pioasm source (`.program`, `.side_set n [opt] [pindirs]`,
+  `.wrap_target`, `.wrap`, `.origin`, `.define`, `.word`, labels, `side`, `[delay]`, every RP2040
+  instruction and its options, expressions with defines) into the same image format as
+  `pioasm -o json` (`pio2.programs.load_program`). Errors name the line and say what is wrong.
+* **Requirement (oracle)**: for every checked-in image made by `pioasm` (`src/programs/**/*.json`),
+  assembling its `.pio` source with `pio2.asm` gives identical instructions, wrap, origin and side-set.
+  Directives pio2 does not use yet (`.pio_version`, `.clock_div`, `.fifo`, `.in`, `.out`, `.set`,
+  `.mov_status`, `.lang_opt`) are accepted and ignored, and say so.
+* **Requirement (GUI)**: an editor window with the source of the loaded program; "Assemble and load"
+  reloads it into the same state machine with the same pin configuration; errors are shown on their
+  line.
+* **Verified by**: `host-tests` (`tests/test_asm.py`: oracle over all images; error cases)
+* **Implementation Target**: `src/pio2/asm.py`, `src/pio2/gui/app.py`
+
 ## 5. Milestones
 
 | M | Content | Done when |
@@ -225,4 +242,5 @@ flowchart TB
 | M4 | breakpoints/watchpoints, reverse step | reverse-step test bit-identical |
 | M5 | stimulus generators, example sessions ([SPEC-DBG-11]) | ESC serial, DShot reply and the IMU auto-DMA session run from the GUI and headless |
 | M6 | diff mode against a reference emulator | first divergence shown on a seeded bug |
+| M2b | built-in assembler + editor ([SPEC-DBG-16]), breakpoints / watchpoints ([SPEC-DBG-04]), reverse step by replay ([SPEC-DBG-06]), clickable IRQ flags, WS2812 part | every pioasm image re-assembled identically; reverse step bit-identical |
 | M7 | barectf CTF traces ([SPEC-DBG-13]); `board` back end on Tang Nano 9K / 20K ([SPEC-DBG-12], [SPEC-DBG-14]) | same session on sim and board, traces compared in AbstractX Studio |

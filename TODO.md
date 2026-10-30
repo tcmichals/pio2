@@ -54,6 +54,9 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 
 ## Decisions
 
+* 2026-10-29 (project owner): RP2350-only PIO features are not a goal; the focus is the RP2040 ISA plus
+  tracing, DMA, the host link packets and the simulator of the whole path.
+
 * 2026-10-29: AXI4-Lite (registers) and AXI-Stream (data) everywhere in pio2, including the tile's register
   port; no Wishbone, no TLP ([SPEC-AXI-01..04]). Reasons: native on the Zynq, proven verification tools
   (ZipCPU formal properties, cocotbext-axi, pyuvm). AbstractX bridges in its own wrapper.
