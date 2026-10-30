@@ -1,6 +1,7 @@
 # pio2 Interconnect: Host Link (SPI / Dual-SPI), Channels, AXI4-Lite, AXI-Stream, DMA, Trace
 
-Status: specification, nothing implemented yet (2026-10-29). Requirements carry tags; code that
+Status: specification; implemented so far: the tile's AXI4-Lite port (`[SPEC-AXI-04]`) and the
+event FIFO (`[SPEC-TRC-01]`) (2026-10-29). Requirements carry tags; code that
 implements one carries `@impl [SPEC-xxx-nn] docs/INTERCONNECT_SPECIFICATION.md`.
 
 ## 1. Idea
@@ -16,23 +17,50 @@ register port. There is **no Wishbone and no TLP in pio2**. The same buses face 
 and the verification can use proven AXI tools (`[SPEC-VER-01]`). AbstractX, which still uses Wishbone
 and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 
+Block diagrams: [`overview.md`](overview.md) (whole FPGA, host link, tile and DMA, trace path).
+
+### Block diagram
+
+The block diagrams (whole FPGA, host link, tile and DMA, trace path) are kept in one place:
+[`overview.md`](overview.md). This section keeps the trace sequence, because it is the
+contract between `[SPEC-TRC-01]`, `[SPEC-TRC-02]` and `[SPEC-LINK-08]`.
+
+On the Zynq the SPI link is not built: the PS GP port drives the core's AXI4-Lite slave, the AXI MCDMA
+takes the core's stream output (trace and rings, channel in `TDEST`) into DDR, and the interrupt is a
+PL-to-PS line (`[SPEC-ICN-11]`).
+
+### How the trace reaches the host
+
+barectf is **not** in the FPGA. The FPGA only makes small fixed records; the host turns them into CTF.
+
+```mermaid
+sequenceDiagram
+    participant SM as PIO SM / DMA / link
+    participant EVF as event FIFO
+    participant DMA as DMA trace channel
+    participant RING as ring 1 (trace)
+    participant ARB as outbound arbiter
+    participant FR as framer + PHY
+    participant H as host driver
+    SM->>EVF: event (type, src, data), timestamp taken this clock
+    Note over EVF: no producer waits: no room = drop and count,<br/>then one DROPPED n record when idle
+    EVF->>DMA: 64-bit records, narrowed to 32-bit words (AXI-Stream)
+    DMA->>RING: RING mode, paced by the event FIFO's TVALID
+    Note over RING: offers a frame at 14 records,<br/>or after its flush time (same rule as every stream)
+    RING->>ARB: one STREAM_DATA frame, chan 1, TLAST on the last word
+    Note over ARB: takes whole frames in turn with ch 2..9,<br/>ch 0 replies have their own buffer
+    ARB->>FR: frame, framer adds header and CRC32
+    FR-->>H: INT_n (ISR: RX frame ready)
+    H->>FR: READ_FRAME window
+    FR->>H: 12 B header + 112 B records + CRC32
+    Note over H: check CRC and seq, extend 32-bit timestamps,<br/>write CTF packets (barectf schema)
 ```
- host SPI master                                FPGA
- ───────────────     ┌────────────────────────────────────────────────────────────────────┐
-  SCK, CS_n ────────►│ SPI PHY          framer (≤128 B,      channel mux                   │
-  IO0 (MOSI) ◄──────►│ single / dual ──► CRC32), NIC regs ──► ch0  AXI4-Lite master ──┐     │
-  IO1 (MISO) ◄──────►│                                        ch1  trace   AXIS in  ◄─┐│     │
-  INT_n ◄────────────│                                        ch2+ streams AXIS in/out ││     │
-                     │                                             ▲  │               ││     │
-                     │                        ring RAM (AXIS) ◄────┘  ▼               ││ AXI4-Lite
-                     │                           ▲  │   DMA engine (AXIS)             ││ crossbar
-                     │                           │  ▼                                 ││     │
-                     │       PIO tile: per-SM TX / RX FIFO AXIS ports ── events ──► event FIFO
-                     │       AXI4-Lite register slave ◄───────────────────────────────┘     │
-                     └────────────────────────────────────────────────────────────────────┘
- Zynq: the PS GP AXI master is a second AXI4-Lite master on the crossbar; the PS AXI DMA connects
- to the ring AXIS ports ([SPEC-ICN-11]).
-```
+
+So the trace is just channel 1: a stream like the DMA rings, merged with them **one whole frame at a
+time** by the outbound arbiter, never interleaved inside a frame. The framer does not care which
+channel a frame came from; the `chan` byte in the header tells the host. The registers that control
+the trace (type mask, level, dropped count, flush time) sit in the `0x2000` window on the
+AXI4-Lite crossbar, like every other block.
 
 ## 2. Buses
 
@@ -63,9 +91,9 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 * **Implementation Target**: `src/rtl/axi/`, `src/rtl/dma/`
 
 ### `[SPEC-AXI-03]` AXI4-Lite Crossbar and Address Map
-* **Requirement**: masters: the link's channel-0 master and (on the Zynq) the PS GP port. Slaves: PIO
-  tile front end, DMA registers, event FIFO / trace registers, link registers. Round-robin between
-  masters; `DECERR` on an unmapped address; a slow slave never blocks a transaction to another one.
+* **Requirement**: one master per build, the core boundary's AXI4-Lite slave (`[SPEC-ICN-11]`), driven
+  by the host adapter: the SPI link's channel-0 master or the Zynq PS GP port. Slaves: PIO tile front
+  end, DMA registers, event FIFO / trace registers, `ISR` / `IMR` and link registers; `DECERR` on an unmapped address; a slow slave never blocks a transaction to another one.
 * **Requirement (address map, base 0x0000_0000, 4 KB windows)**:
 
   | Window | Slave |
@@ -74,8 +102,8 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
   | `0x1000` | DMA engine registers (per channel) |
   | `0x2000` | event FIFO / trace registers |
   | `0x3000` | link registers (version, channel status, interrupt mask, error counters) |
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_xbar_cocotb.py`: fairness, `DECERR`,
-  two masters at once), `formal-check`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_xbar_cocotb.py`: `DECERR`, slow slave
+  does not block others), `formal-check`
 * **Implementation Target**: `src/rtl/axi/pio2_axil_xbar.sv`
 
 ### `[SPEC-AXI-05]` Reuse Proven AXI Building Blocks
@@ -198,6 +226,22 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_channels_cocotb.py`)
 * **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`
 
+### `[SPEC-LINK-08]` Outbound Frames Are Merged Whole
+* **Requirement**: frames to the host come from channel 0 (register replies, `ACK` / `NAK`, `STATUS`),
+  channel 1 (trace, `[SPEC-TRC-02]`) and channels 2..9 (out streams). One arbiter fills the outbound
+  frame buffers (`[SPEC-LINK-07]`) one **whole frame** at a time; a frame is never interleaved with
+  another, and the framer adds the header and CRC32 the same way for every channel.
+* **Requirement (order)**: one outbound buffer is reserved for channel 0, so a register reply never
+  waits behind stream data; channels 1..9 arrive already merged from the core's AXI-Stream output
+  (`[SPEC-ICN-11]`: whole `TLAST` blocks, round robin, so the trace cannot starve a stream and a stream
+  cannot starve the trace) and fill the other buffers, one block per frame. A stream channel offers a
+  frame when it has a full frame of words or, with fewer, after its flush time.
+* **Rationale**: whole frames keep each frame's CRC and `chan` meaningful; the reserved buffer keeps
+  register access latency bounded while streams run at full rate.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_link_channels_cocotb.py`: all channels busy
+  at once, every frame whole and in channel order, register reply latency bounded, round robin share)
+* **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`
+
 ### `[SPEC-LINK-04]` Flow Control by Credits
 * **Requirement**: the `STATUS` reply returns, per channel, words available (out) or words free (in). The host
   never sends more than the free count; the FPGA never returns more than it has. Neither side can
@@ -224,8 +268,9 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 ## 4. DMA
 
 ### `[SPEC-DMA-01]` Channels Paced by the PIO FIFOs
-* **Requirement**: eight channels. Each moves 32-bit words between a ring buffer in RAM and one PIO
-  FIFO (TX of SM n, or RX of SM n), paced by that FIFO's data request (TX not full / RX not empty),
+* **Requirement**: eight PIO channels plus one trace channel. Each PIO channel moves 32-bit words
+  between a ring buffer in RAM and one PIO FIFO (TX of SM n, or RX of SM n); the trace channel moves
+  event records from the event FIFO into ring 1 (`[SPEC-TRC-02]`). Every channel is paced by that FIFO's data request (TX not full / RX not empty),
   as RP2040 DMA is paced by DREQ; both sides are AXI-Stream (`[SPEC-AXI-02]`), so the FIFO's handshake
   is the pacing.
 * **Requirement (modes)**: `ONE_SHOT` (N words, then done), `RING` (continuous; ring wraps),
@@ -251,26 +296,61 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 ## 5. Trace (barectf)
 
 ### `[SPEC-TRC-01]` Event FIFO With Fixed Records
-* **Requirement**: producers (PIO tile, DMA engine, link) write fixed 64-bit records into one event
-  FIFO through a small arbiter (fixed priority: errors > DMA > PIO > link; no producer ever waits:
-  a record that does not fit is dropped and counted, and a `DROPPED n` record is written when space
-  returns).
-* **Requirement (record)**: `timestamp[31:0]` (system clocks, wraps; the host extends it to 64 bits),
-  `type[7:0]`, `src[7:0]` (SM or DMA channel), `data[15:0]` (PC, word count, IRQ number, ...).
-* **Requirement (types)**: SM stall begin / end (with reason), IRQ set / clear, FIFO full / empty edges,
-  DMA burst begin / done / underrun / overrun, trigger, link frame error, dropped. Per-instruction
-  events exist in simulation only (`[SPEC-DBG-13]`): at full speed they would fill the FIFO.
-* **Requirement (enable)**: a type mask register; tracing off costs no bandwidth.
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_event_fifo_cocotb.py`: priority, drop-and-count, DROPPED record)
+* **Requirement**: `N_PROD` producers (PIO tile, DMA engine, link, ...) each offer one record at a time
+  (`valid` with `type`, `src`, `data`; no `ready`: **no producer ever waits**). The timestamp is taken
+  in the clock the event is offered. Each producer has a one-record holding slot; the slots drain into
+  one FIFO, one record per clock, by fixed priority (producer 0 highest: errors > DMA > PIO > link). An
+  event offered while its producer's slot is still full is **dropped and counted**; when the drop count
+  is non-zero, a `DROPPED` record (`data` = count, saturating; timestamp = the clock of the first lost
+  event) is written in a clock when no slot is waiting (lowest priority), so reporting losses never
+  causes more of them; the saturating 32-bit total stays exact. Records leave in priority order, not
+  strictly in time order; each carries its own timestamp and the host orders them (`[SPEC-TRC-02]`).
+  Type codes above `0x1F` are ignored (not recorded, not counted).
+* **Requirement (record, 64 bits)**: `[15:0] data` (PC, word count, IRQ number, drop count, ...),
+  `[23:16] src` (SM or DMA channel), `[31:24] type`, `[63:32] timestamp` (system clocks, wraps; the host
+  extends it to 64 bits). On the link a record is two 32-bit words, bits `[31:0]` first.
+* **Requirement (types)**:
+
+  | Code | Type | Code | Type |
+  | :--- | :--- | :--- | :--- |
+  | `0x01` / `0x02` | SM stall begin / end (`data`: reason, PC) | `0x08` / `0x09` | DMA burst begin / done |
+  | `0x03` / `0x04` | IRQ flag set / clear | `0x0A` / `0x0B` | DMA underrun / overrun |
+  | `0x05` / `0x06` | FIFO full / empty edge | `0x0C` | DMA trigger |
+  | `0x10` | link frame error | `0x1F` | `DROPPED` (`data` = records lost, saturating) |
+
+  Per-instruction events exist in simulation only (`[SPEC-DBG-13]`): at full speed they would fill the
+  FIFO. Field layouts per type live in the barectf schema (`[SPEC-TRC-02]`).
+* **Requirement (enable)**: a 32-bit type mask, one bit per type code `0x00..0x1F`; a masked event is not
+  recorded and not counted as dropped, so tracing off costs no bandwidth. `DROPPED` is always enabled.
+* **Requirement (status)**: FIFO level and a saturating 32-bit total of dropped records, for the
+  `0x2000` register window.
+* **Requirement (reuse, `[SPEC-AXI-05]`)**: the FIFO is Forencich `axis_fifo` (64-bit, depth a build
+  parameter, default 512 records); pio2 writes only the slots, the priority and the drop logic. The
+  record stream is 64 bits wide inside; a Forencich `axis_adapter` narrows it to the 32-bit DMA stream
+  (bits `[31:0]` first).
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_event_fifo_cocotb.py`: priority,
+  drop-and-count with a `DROPPED` record in the right place, mask, random back-pressure, no record lost
+  or duplicated that was not counted, 1000-event steady state)
 * **Implementation Target**: `src/rtl/trace/pio2_event_fifo.sv`
 
 ### `[SPEC-TRC-02]` Records Become barectf CTF on the Host
+* **Requirement (path, project owner 2026-10-29)**: the trace goes through the DMA engine like any other
+  stream, so it works the same on every host: the event FIFO is the source of a dedicated DMA trace
+  channel (`[SPEC-DMA-01]`) in `RING` mode, which moves the records into ring 1. Ring 1 is the
+  channel-1 out stream: on the SPI link it reaches the host through the outbound arbiter
+  (`[SPEC-LINK-08]`), up to 14 records (112 bytes) per `STREAM_DATA` frame; on the Zynq through
+  the core's stream output and the AXI MCDMA (`[SPEC-ICN-11]`). It offers a frame when full or after its flush
+  time, so a quiet trace still reaches the host. There is no separate trace packer.
+* **Rationale**: one path for SPI and Zynq; the ring gives deep buffering (BRAM) in front of a slow
+  link; levels, thresholds, interrupts and counters are the ones every stream already has.
 * **Requirement**: channel 1 streams the records; the host driver converts them into CTF 1.8 packets
   with a barectf schema (`src/pio2/trace/barectf_config.yaml`, aligned with AbstractX's
   `pio_event`), so simulation and board traces are the same and open in babeltrace2, Trace Compass
   and AbstractX Studio.
 * **Verified by**: `host-tests` (records -> CTF, read back with babeltrace2)
-* **Implementation Target**: `src/pio2/trace/ctf.py`, `src/pio2/trace/barectf_config.yaml`
+* **Requirement (order)**: the host sorts records by their extended timestamp before writing CTF
+  packets, because the event FIFO emits them in priority order (`[SPEC-TRC-01]`).
+* **Implementation Target**: `src/rtl/dma/pio2_dma.sv` (trace channel), `src/pio2/trace/ctf.py`, `src/pio2/trace/barectf_config.yaml`
 
 ## 6. Integration and tests
 
@@ -287,15 +367,35 @@ and TLP inside, bridges to pio2 in its own wrapper (`[SPEC-ICN-09]`).
 
 ### `[SPEC-ICN-11]` Host Adapters: SPI Link for Tang, Native AXI for Zynq
 * **Requirement**: the core (AXI4-Lite crossbar, DMA engine, rings, event FIFO, PIO tile) is the same on
-  every board; only the host side changes:
-  * **SPI link** (`[SPEC-LINK-*]`): an external CPU over SPI / Dual-SPI (Tang Nano 9K / 20K with a Pico,
-    an SBC or the Cubie). The link's channel 0 is an AXI4-Lite master; its stream channels are AXI-Stream.
-  * **Zynq-7000**: no adapter logic. The PS GP AXI port (through the Xilinx AXI interconnect / protocol
-    converter to AXI4-Lite) is a second crossbar master; the PS AXI DMA (or HP ports) connects to the
-    ring AXI-Stream ports; the interrupt is a PL-to-PS IRQ line with the same `ISR` / `IMR`.
+  every board; only the host adapter changes, and a build has exactly one: the **SPI link**
+  (`[SPEC-LINK-*]`, an external CPU over SPI / Dual-SPI: Tang Nano 9K / 20K with a Pico, an SBC or the
+  Cubie) or the **Zynq-7000** PS (no SPI at all). Diagrams: `docs/overview.md`.
+* **Requirement (which adapter, project owner 2026-10-29)**: the SPI link is optional, chosen per board:
+
+  | Board | SPI link | Zynq adapter | Why |
+  | :--- | :--- | :--- | :--- |
+  | Tang Nano 9K / 20K (Gowin, no CPU on chip) | **required** | none | the host is outside the FPGA (Pico, SBC, Cubie) |
+  | Zynq-7000 | **not built** | **required** | the ARM cores are on the chip, on AXI |
+  | any other FPGA with an external host | required | none | as the Tang boards |
+  | simulation (Verilator) | at the pins, or bypassed (`[SPEC-LINK-06]`) | none | same driver either way |
+
+* **Requirement (core boundary, 2026-10-29)**: `pio2_core` has exactly four host-facing interfaces, and
+  both host adapters attach to them unchanged:
+  1. one AXI4-Lite slave (all registers, `[SPEC-AXI-03]` map);
+  2. one AXI-Stream input, 32-bit, channel number in `TDEST` (2..9), `TLAST` per block;
+  3. one AXI-Stream output, 32-bit, channel number in `TDEST` (1..9), whole `TLAST` blocks merged
+     inside the core by Forencich `axis_arb_mux` (trace ring and out rings, round robin);
+  4. one interrupt (any `ISR` and `IMR`).
+* **Requirement (SPI adapter)**: PHY, framers, CRC32, an AXI4-Lite master for channel 0, and the
+  frame / block conversion (channel in the frame header <-> `TDEST`); it puts channel-0 replies first
+  (`[SPEC-LINK-08]`) and drives `INT_n` from the interrupt.
+* **Requirement (Zynq adapter)**: no pio2 RTL. The PS GP port reaches the AXI4-Lite slave through the
+  Xilinx AXI interconnect / protocol converter; the Xilinx AXI MCDMA (one DMA channel per pio2 channel,
+  routed by `TDEST`) connects the two streams to DDR through an HP port; the interrupt goes to
+  `IRQ_F2P`.
 * **Requirement**: the host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap
   for the registers, a DMA buffer for the streams) with the same channel API.
-* **Verified by**: `cocotb-regression` (the core with two AXI4-Lite masters at once), `board-bringup`
+* **Verified by**: `cocotb-regression` (the core through its boundary with each adapter's traffic pattern), `board-bringup`
   (Zynq: registers and one stream through the PS)
 * **Implementation Target**: `src/rtl/pio2_core.sv`, `src/pio2/host/zynq.py`
 

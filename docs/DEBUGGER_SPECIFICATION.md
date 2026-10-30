@@ -37,20 +37,19 @@ debugger runs the RTL itself (Verilator), which gives what a software emulator c
 
 ## 3. Architecture
 
-```
- .pio source ──pioasm──► image (.json) ─┐
-                                        ▼
- ┌───────────────────── pio2.debug (Python) ─────────────────────┐
- │  Session: load, step, run, breakpoints, snapshots, stimulus   │
- │  Trace store (per-cycle pins, per-SM state)                    │
- └──────────────┬──────────────────────────────┬─────────────────┘
-                │ ctypes (C ABI)               │
- ┌──────────────▼──────────────┐   ┌───────────▼───────────┐
- │ libpio2sim.so (Verilator)   │   │ reference emulator     │ (optional, [SPEC-DBG-08])
- │ asp_pio_tile + C wrapper    │   └────────────────────────┘
- └─────────────────────────────┘
-                ▲
- GUI: imgui-bundle (ImGui + ImPlot)      CLI: pio2-debug run/step/trace
+```mermaid
+flowchart TB
+    SRC[".pio source"] -->|"pioasm"| IMG["image .json"]
+    subgraph PY["pio2.debug (Python)"]
+        SES["Session<br/>load, step, run, breakpoints,<br/>snapshots, stimulus"]
+        TRS["trace store<br/>per-cycle pins, per-SM state"]
+    end
+    IMG --> SES
+    SES <-->|"ctypes, C ABI"| LIB["libpio2sim.so (Verilator)<br/>asp_pio_tile + C wrapper"]
+    SES <-->|"optional, SPEC-DBG-08"| REF["reference emulator"]
+    SES --- TRS
+    GUI["GUI: imgui-bundle<br/>ImGui + ImPlot"] --> SES
+    CLI["CLI: pio2-debug<br/>run / step / trace"] --> SES
 ```
 
 ## 4. Requirements

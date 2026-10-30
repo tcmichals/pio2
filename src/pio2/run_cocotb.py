@@ -52,7 +52,7 @@ def main():
     if not names:
         print(f"no suite matches {a.only!r}", file=sys.stderr)
         return 2
-    env = dict(os.environ, PATH=tool_path(), SIM=a.sim)
+    env = dict(os.environ, PATH=tool_path(), SIM=a.sim, PIO2_ROOT=str(ROOT))
     failures = 0
     tmp = tempfile.mkdtemp(prefix="pio2-cocotb-")
     try:

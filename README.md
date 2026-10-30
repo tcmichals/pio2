@@ -4,8 +4,9 @@ A programmable I/O block that runs the Raspberry Pi RP2040 / RP2350 PIO instruct
 written in SystemVerilog for FPGAs, plus the tools to write, test and **see** PIO programs run.
 
 * `src/rtl/`: the PIO tile (four state machines, shared 32-word instruction memory, FIFOs, IRQs,
-  pin mapping, side-set), with its register port moving to AXI4-Lite and its FIFOs to AXI-Stream
-  (today still the Wishbone port and a TLP adapter inherited from AbstractX).
+  pin mapping, side-set) with an AXI4-Lite register port, and the interconnect blocks around it
+  (event FIFO so far; SPI link, DMA and crossbar to come). The TLP adapter inherited from AbstractX
+  is still in the tile and moves out to AbstractX's wrapper next.
 * `src/programs/`: the program library (`.pio` sources and the `pioasm` images next to them):
   bidirectional DShot600, ESC serial passthrough, the conformance suite, and programs from
   Raspberry Pi's pico-examples (BSD-3-Clause, see `src/programs/examples/pico/LICENSE.TXT`).
@@ -20,6 +21,60 @@ machine's registers, FIFOs, clock divider phase, stall reason and pins visible.
 
 This project started as `rtl/pio` inside [AbstractX](https://github.com/tcmichals/AbstractX), which
 uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
+
+## What you get
+
+```mermaid
+flowchart TB
+    classDef host fill:#f2f2f2,stroke:#555,color:#111
+    classDef opt fill:#ffffff,stroke:#777,color:#111
+    classDef core fill:#e6efff,stroke:#2f5fb3,color:#0b1f44
+    classDef pins fill:#fff1db,stroke:#c07a00,color:#3a2500
+
+    EXT["external host<br/>Pico, SBC, Cubie, PC"]:::host
+    PS["Zynq PS<br/>ARM + Linux"]:::host
+    SIM["pio2 simulator / debugger<br/>same RTL on Verilator"]:::host
+
+    subgraph OPTA["option A: SPI host link"]
+        SPI["SPI / Dual-SPI<br/>128 B frames, CRC32, INT_n"]:::opt
+    end
+    subgraph OPTB["option B: Zynq, no SPI"]
+        ZAD["PS GP port + AXI MCDMA"]:::opt
+    end
+
+    subgraph CORE["pio2 core: same RTL on every board"]
+        XBAR["AXI4-Lite registers"]:::core
+        DMA["DMA + rings<br/>streams and trace"]:::core
+        PIO["PIO tile<br/>4 state machines<br/>RP2040 / RP2350 ISA"]:::core
+        TRC["event FIFO"]:::core
+    end
+    PINS(["32 GPIO lines<br/>mapped per state machine"]):::pins
+    CTF["barectf CTF 1.8<br/>babeltrace2, Studio"]:::host
+
+    EXT -.-> SPI
+    PS -.-> ZAD
+    SIM -.->|"same driver"| SPI
+    SPI -.->|"AXI4-Lite + AXI-Stream"| CORE
+    ZAD -.->|"AXI4-Lite + AXI-Stream"| CORE
+    XBAR --> PIO
+    DMA <==> PIO
+    PIO --> TRC ==> DMA
+    PIO <--> PINS
+    EXT --> CTF
+    PS --> CTF
+
+    style OPTA fill:none,stroke:#888,stroke-width:2px,stroke-dasharray:8 5
+    style OPTB fill:none,stroke:#888,stroke-width:2px,stroke-dasharray:8 5
+    style CORE fill:#f5f8ff,stroke:#2f5fb3,stroke-width:2px
+```
+
+The core is the same everywhere; a build adds one host adapter (dashed). The SPI link is optional:
+required on the Tang Nano 9K / 20K (no CPU on the chip), not built on a Zynq, where the ARM cores use
+AXI4-Lite and AXI-Stream directly. Either way the host sees registers on channel 0, data streams
+through DMA rings, and a trace of what every state machine did, which the host turns into barectf
+CTF. The simulator runs the same RTL behind the same driver, so a program debugged on the desktop
+runs unchanged on a board. Detailed diagrams of each part: [`docs/overview.md`](docs/overview.md).
+Most of the interconnect is still specified, not built: see [Status](#status) and [`TODO.md`](TODO.md).
 
 ## Direction
 
@@ -39,8 +94,9 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
   has `pio_event`: tile, SM, event type, PC, duration, next to `tlp_push` / `tlp_pop`). Simulation
   traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
   simulated run can be compared with a board run event by event.
-* **Zynq: native AXI.** On the Zynq-7000 the PS GP port is a second AXI4-Lite master and the PS AXI
-  DMA connects to the ring AXI-Stream ports ([SPEC-ICN-11]); no bridge.
+* **Zynq: native AXI, no SPI.** On the Zynq-7000 the SPI link is not built: the PS GP port drives the
+  core's AXI4-Lite slave and the Xilinx AXI MCDMA connects to its two AXI-Stream ports, channel in
+  `TDEST` ([SPEC-ICN-11]).
 * **Full validation** ([SPEC-VER-01]): ZipCPU's AXI formal properties under SymbiYosys, UVM-style
   pyuvm testbenches with cocotbext-axi, functional coverage with cocotb-coverage.
 * **Example boards: Tang Nano 9K and Tang Nano 20K** (Gowin, open-source flow). The board tops,
@@ -57,15 +113,15 @@ uses it as a git submodule ([`docs/provenance.md`](docs/provenance.md)).
   as a behaviour reference, Betaflight's PIO programs, our DShot / ESC serial programs, and the
   IMU auto-DMA path (DRDY -> SPI burst -> TLP frames). Details: [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md).
 
-```
-          .pio  ──pioasm──►  image
-                               │
-   IDE / debugger (Python, imgui-bundle) ── host link: SPI frames, channels ─┐
-        │                                                                   │
-        │ barectf CTF traces (AbstractX schema)                 ┌───────────┴───────────┐
-        ▼                                                       │                       │
-   AbstractX Studio / babeltrace2                    Verilator model of        Tang Nano 9K / 20K
-                                                     src/rtl (simulation)      (AXI4-Lite/AXIS + DMA + link)
+```mermaid
+flowchart LR
+    SRC[".pio source"] -->|"pioasm"| IMG["program image"]
+    IMG --> IDE["IDE / debugger<br/>Python, imgui-bundle"]
+    IDE <-->|"host link: SPI frames, channels"| SIM["Verilator model of src/rtl<br/>simulation"]
+    IDE <-->|"same host link"| BRD["Tang Nano 9K / 20K<br/>AXI4-Lite / AXIS + DMA + link"]
+    SIM -.->|"trace records"| IDE
+    BRD -.->|"trace records"| IDE
+    IDE -->|"barectf CTF 1.8"| VIEW["AbstractX Studio<br/>babeltrace2"]
 ```
 
 ## Quick start
@@ -138,7 +194,8 @@ Rules for contributors and agents: [`AGENTS.md`](AGENTS.md) (AbstractX SpecTrace
 ## Documentation
 
 * [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md): requirements (`[SPEC-PIO-*]`), RP2040 parity checklist
-* [`docs/architecture.md`](docs/architecture.md): block diagram, register map, ports
+* [`docs/overview.md`](docs/overview.md): what pio2 offers, four block diagrams (FPGA, link, tile + DMA, trace)
+* [`docs/architecture.md`](docs/architecture.md): tile register map, ports
 * [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md): visual single-step debugger and parts canvas design
 * [`docs/INTERCONNECT_SPECIFICATION.md`](docs/INTERCONNECT_SPECIFICATION.md): host link (SPI / Dual-SPI, 128-byte CRC32 frames, NIC-style registers), channels, AXI4-Lite / AXI-Stream, DMA, barectf trace, verification
 * [`docs/boards.md`](docs/boards.md): Tang Nano 9K / 20K example boards (built from AbstractX)

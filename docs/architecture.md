@@ -19,7 +19,7 @@ The **AbstractX Programmable I/O (ASP-PIO) Tile** is a synthesizable, autonomous
 ```mermaid
 flowchart TD
     subgraph Host["Host Interface"]
-        WB["Wishbone Bus (0x40000700)"]
+        WB["AXI4-Lite register port"]
         SYS_TIME["64-bit Nanosecond Timebase"]
     end
 
@@ -49,7 +49,7 @@ flowchart TD
     SM1 <-->|irq 0..7 Handshake| SM0
     SMs <-->|Physical Wiggling| PINS
     SM1 -->|Auto-Push Samples| TLP_SHIM
-    TLP_SHIM -->|512-bit AXI-Stream| ROUTER
+    TLP_SHIM -->|"TLP stream (moves to AbstractX, SPEC-ICN-09)"| ROUTER
 ```
 
 ## 3. Hardware Interface & Port Specifications
