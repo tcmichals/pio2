@@ -333,6 +333,30 @@ AXI4-Lite crossbar, like every other block.
   or duplicated that was not counted, 1000-event steady state)
 * **Implementation Target**: `src/rtl/trace/pio2_event_fifo.sv`
 
+### `[SPEC-TRC-03]` PIO Trace Sources
+* **Requirement**: the tile has a read-only observation port (per SM: PC, stalled, TX FIFO empty, RX
+  FIFO full; the 8 IRQ flags) and `pio2_trace_tap` turns its edges into `[SPEC-TRC-01]` records, one
+  producer per SM plus one for the IRQ flags:
+
+  | Edge | Record (`type`, `src`, `data`) |
+  | :--- | :--- |
+  | SM n starts stalling | `0x01`, n, PC |
+  | SM n stops stalling | `0x02`, n, PC of the instruction that was stalled |
+  | IRQ flag i set / cleared | `0x03` / `0x04`, 0xFF, i |
+  | SM n RX FIFO becomes full | `0x05`, n, 1 |
+  | SM n TX FIFO becomes empty | `0x06`, n, 0 |
+
+* **Requirement**: when several edges of one producer happen in the same clock they are offered one per
+  clock in the table's order; each record carries the PC captured at its edge, and its timestamp is
+  at most 3 clocks late (8 for IRQ edges). An edge that repeats before its first record was offered
+  is merged into it and counted (`o_merged`); every other loss happens in the event FIFO, where it is
+  counted too (`[SPEC-TRC-01]`).
+* **Requirement**: `pio2_core` contains the tile, the tap and the event FIFO; until the DMA engine exists
+  the record stream is a port of the core, and the debugger reads it directly.
+* **Verified by**: `host-tests` (`tests/test_trace.py`: blink's stall on `pull`, IRQ set / clear,
+  FIFO edges, timestamps against the per-clock trace)
+* **Implementation Target**: `src/rtl/trace/pio2_trace_tap.sv`, `src/rtl/pio2_core.sv`, `src/rtl/asp_pio_tile.sv`
+
 ### `[SPEC-TRC-02]` Records Become barectf CTF on the Host
 * **Requirement (path, project owner 2026-10-29)**: the trace goes through the DMA engine like any other
   stream, so it works the same on every host: the event FIFO is the source of a dedicated DMA trace

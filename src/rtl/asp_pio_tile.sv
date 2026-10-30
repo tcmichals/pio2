@@ -59,7 +59,14 @@ module asp_pio_tile #(
     input  wire          m_tlp_tready,
 
     // Hardware Tile Interrupt Request to CPU
-    output logic         o_pio_irq
+    output logic         o_pio_irq,
+
+    // Observation port for the trace tap ([SPEC-TRC-03]); read-only, changes nothing
+    output logic [19:0]  o_obs_pc,           // SM n PC in [5n+4:5n]
+    output logic [3:0]   o_obs_stalled,
+    output logic [3:0]   o_obs_tx_empty,
+    output logic [3:0]   o_obs_rx_full,
+    output logic [7:0]   o_obs_irq
 );
 
     // ------------------------------------------------------------------------
@@ -188,6 +195,9 @@ module asp_pio_tile #(
     // What the SMs see: a set or clear is visible one clock after the instruction ([SPEC-PIO-02] rule 6)
     logic [7:0] irq_view;
     assign irq_view = (irq_flags | combined_irq_set) & ~combined_irq_clr;
+    // @impl [SPEC-TRC-03] docs/INTERCONNECT_SPECIFICATION.md
+    assign o_obs_irq     = irq_flags;
+    assign o_obs_stalled = sm_stalled;
 
     // ------------------------------------------------------------------------
     // Tile-Level Configuration & Status Registers
@@ -311,8 +321,11 @@ module asp_pio_tile #(
                 .o_irq_clr        (sm_irq_clr[s]),
                 .o_exec_stalled   (sm_stalled[s]),
                 .o_exec_latched   (sm_exec_latched[s]),
-                .o_sm_active      (sm_active[s])
+                .o_sm_active      (sm_active[s]),
+                .o_tx_empty       (o_obs_tx_empty[s]),
+                .o_rx_full        (o_obs_rx_full[s])
             );
+            assign o_obs_pc[5*s +: 5] = sm_pc[s];
         end
     endgenerate
 

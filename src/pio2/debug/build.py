@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Tim Michals
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Build libpio2sim.so (Verilator model of src/rtl/asp_pio_tile.sv + the C ABI in sim/pio2sim.cpp).
+"""Build libpio2sim.so (Verilator model of src/rtl/pio2_core.sv + the C ABI in sim/pio2sim.cpp).
 
 The library lands in build/sim/ and is rebuilt when any RTL or wrapper file is newer than it.
 """
@@ -16,8 +16,10 @@ RTL = ROOT / "src" / "rtl"
 SIM = Path(__file__).resolve().parent / "sim"
 OUT = ROOT / "build" / "sim"
 LIB = OUT / "libpio2sim.so"
-SOURCES = [RTL / "asp_pio_sm.sv", RTL / "asp_pio_tlp_ingress.sv", RTL / "asp_pio_tlp_shim.sv",
-           RTL / "asp_pio_tile.sv"]
+SOURCES = [ROOT / "third_party" / "verilog-axis" / "rtl" / "axis_fifo.v",
+           RTL / "asp_pio_sm.sv", RTL / "asp_pio_tlp_ingress.sv", RTL / "asp_pio_tlp_shim.sv",
+           RTL / "asp_pio_tile.sv", RTL / "trace" / "pio2_event_fifo.sv",
+           RTL / "trace" / "pio2_trace_tap.sv", RTL / "pio2_core.sv"]
 
 
 def verilator():
@@ -37,7 +39,7 @@ def build(force=False, quiet=True):
         return LIB
     OUT.mkdir(parents=True, exist_ok=True)
     cmd = [verilator(), "--cc", "--exe", "--build", "--vpi", "-O2", "-j", str(os.cpu_count() or 2),
-           "--top-module", "asp_pio_tile", "-Mdir", str(OUT / "obj"), "-o", str(LIB),
+           "--top-module", "pio2_core", "-Wno-fatal", "-Mdir", str(OUT / "obj"), "-o", str(LIB),
            "-CFLAGS", "-fPIC -O2", "-LDFLAGS", "-shared",
            str(SIM / "pio2sim.vlt"), *map(str, SOURCES), str(SIM / "pio2sim.cpp")]
     env = dict(os.environ)

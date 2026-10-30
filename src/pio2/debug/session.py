@@ -71,6 +71,9 @@ def _lib():
         "write": ([vp, u32, u32], i32), "read": ([vp, u32, C.POINTER(u32)], i32),
         "get": ([vp, C.c_char_p, C.POINTER(u32), i32], i32),
         "get_index": ([vp, C.c_char_p, i32, C.POINTER(u32), i32], i32),
+        "events_pending": ([vp], u32), "events_drain": ([vp, u32, C.c_void_p], None),
+        "trace_config": ([vp, u32, i32], None),
+        "trace_counters": ([vp, C.POINTER(u32), C.POINTER(u32)], None),
     }
     for name, (args, res) in sig.items():
         f = getattr(lib, "pio2sim_" + name)
@@ -79,6 +82,28 @@ def _lib():
 
 
 _LIB = None
+
+# Trace record types ([SPEC-TRC-01], [SPEC-TRC-03])
+EVENT_NAMES = {0x01: "stall begin", 0x02: "stall end", 0x03: "irq set", 0x04: "irq clear",
+               0x05: "RX FIFO full", 0x06: "TX FIFO empty", 0x08: "DMA burst", 0x09: "DMA done",
+               0x0A: "DMA underrun", 0x0B: "DMA overrun", 0x0C: "DMA trigger", 0x10: "link frame error",
+               0x1F: "DROPPED"}
+
+
+TAP_LATENCY = 2   # clocks from a state change in the per-clock trace to its record's timestamp
+
+
+@dataclass
+class Event:
+    cycle: int        # session clock the record's timestamp corresponds to
+    ts: int           # raw 32-bit timestamp from the record
+    type: int
+    src: int
+    data: int
+
+    @property
+    def name(self):
+        return EVENT_NAMES.get(self.type, f"type 0x{self.type:02x}")
 
 
 class Trace:
@@ -144,13 +169,41 @@ class Session:
     def reset(self):
         self.lib.pio2sim_record(self.h, 0)
         self.lib.pio2sim_reset(self.h, 5)
+        self._drain_events(keep=False)
         self.programs.clear()
         self.trace = Trace(self.trace.depth)
         self.trace.start = self.cycle
+        self.ts_base = self.cycle          # the core's timestamp counts clocks from here
+        self.events = []
         self.lib.pio2sim_record(self.h, 1)
+
+    def _drain_events(self, keep=True):
+        n = self.lib.pio2sim_events_pending(self.h)
+        if not n:
+            return
+        buf = (C.c_uint64 * n)()
+        self.lib.pio2sim_events_drain(self.h, n, buf)
+        if keep:
+            for rec in buf:
+                ts = rec >> 32
+                self.events.append(Event(self.ts_base + ts - TAP_LATENCY, ts, rec >> 24 & 0xFF, rec >> 16 & 0xFF,
+                                         rec & 0xFFFF))
+            if len(self.events) > 100_000:
+                del self.events[:len(self.events) - 100_000]
+
+    def trace_config(self, type_mask=0xFFFF_FFFF, ready=True):
+        """Which record types the core keeps, and whether the reader takes them (False: back-pressure)."""
+        self.lib.pio2sim_trace_config(self.h, type_mask, int(ready))
+
+    def trace_counters(self):
+        """(records dropped in the event FIFO, edges merged in the tap)."""
+        d, m = C.c_uint32(), C.c_uint32()
+        self.lib.pio2sim_trace_counters(self.h, C.byref(d), C.byref(m))
+        return d.value, m.value
 
     def _drain(self):
         """Move every clock the model ran (stepping or register access) into the trace."""
+        self._drain_events()
         n = self.lib.pio2sim_pending(self.h)
         if not n:
             return

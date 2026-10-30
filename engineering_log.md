@@ -121,3 +121,21 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   next cycle, so those cases run in an enabled program.
 * **Not verified**: the same cases under cocotb / Icarus (a second simulator); RP2350-only features
   (not a goal, project owner 2026-10-29).
+
+## 2026-10-29: PIO tracing in the RTL: observation port, trace tap, pio2_core; Trace window
+
+* **Category**: `process-gap` (feature), `false-alarm` (one test)
+* **What**: the tile gained a read-only observation port (per-SM PC, stalled, TX empty, RX full; IRQ
+  flags); `pio2_trace_tap` turns its edges into [SPEC-TRC-01] records; `pio2_core` = tile + tap + event
+  FIFO. The debugger now simulates `pio2_core` and shows the records (Trace window, stall markers on
+  the PC plot). Records are checked against the per-clock trace: 1000 blink rounds, every stall begin /
+  end at the same clock and PC; IRQ set / clear; FIFO edges; type mask; back-pressure drops counted
+  and reported by a DROPPED record.
+* **Found**: stall-end records first carried the next PC; spec now says the PC of the stalled
+  instruction. The record timestamp is a constant 2 clocks after the per-clock state (edge detect +
+  counter start), corrected once in `Session` (`TAP_LATENCY`) and checked by the tests.
+* **False alarm (test)**: the drop test read the drop counter while the program still ran.
+* **Evidence**: pytest 441 passed; `pio2-cocotb` 7/7 (48 tests) with the new tile ports; tap mutant
+  (no RX-full edges) fails `test_fifo_edges`.
+* **Not verified**: the tap and core under formal; the records through the DMA trace channel (no DMA
+  yet); AbstractX lint with the new unconnected tile outputs (checked in the AbstractX commit).

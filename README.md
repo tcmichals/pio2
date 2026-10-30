@@ -93,16 +93,19 @@ uv run pio2-debug --example "UART TX" --clocks 20000    # the same session headl
 | :---: | :---: |
 | ![button](docs/images/gui-button.png) | ![uart](docs/images/gui-uart.png) |
 
-| Bidirectional DShot: driven (teal) and released (grey) in the logic analyzer |
-| :---: |
-| ![dshot](docs/images/gui-dshot.png) |
+| Bidirectional DShot: driven (teal) and released (grey) | Hardware trace records from the RTL (stall on `pull`, FIFO empty) |
+| :---: | :---: |
+| ![dshot](docs/images/gui-dshot.png) | ![trace](docs/images/gui-trace.png) |
 
 Built so far (milestones in [`docs/DEBUGGER_SPECIFICATION.md`](docs/DEBUGGER_SPECIFICATION.md)):
 `libpio2sim.so` (unmodified RTL, signals read through VPI by name, every clock recorded), the
 `pio2.debug.Session` engine (13 pytest tests), program listing with per-SM PC markers, SM state and
 FIFOs, IRQ flags, a parts canvas (LED, push button, UART terminal), a logic analyzer with a PC
 timeline, run / pause / step clock / step instruction, and four examples (Blink, UART TX, Button to
-LED, DShot). Not yet: breakpoints, reverse step, FST / CTF export, saved layouts, more parts.
+LED, DShot), a built-in assembler (`pio2.asm`, identical to pioasm on all 30 checked-in images),
+every RP2040 opcode checked on the RTL (384 cases), and hardware tracing: the RTL's trace tap and
+event FIFO produce stall / IRQ / FIFO records shown in the Trace window. Not yet: breakpoints,
+reverse step, FST / CTF export, saved layouts, the editor window, more parts, DMA and the host link.
 
 ## Direction
 

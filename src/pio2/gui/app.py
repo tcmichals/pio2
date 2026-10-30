@@ -392,6 +392,45 @@ class App:
                 imgui.set_scroll_here_y(1.0)
             imgui.end_child()
 
+    def trace_view(self):
+        """Hardware trace records from the core's event FIFO ([SPEC-TRC-03]), newest last."""
+        s = self.s
+        dropped, merged = s.trace_counters()
+        imgui.text_colored(v4(MUTED), f"{len(s.events):,} records from the RTL event FIFO   "
+                                      f"dropped {dropped}   merged {merged}")
+        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.scroll_y | imgui.TableFlags_.sizing_fixed_fit
+                 | imgui.TableFlags_.borders_inner_v)
+        if imgui.begin_table("trace", 4, flags, ImVec2(0, 0)):
+            imgui.table_setup_scroll_freeze(0, 1)
+            imgui.table_setup_column("cycle")
+            imgui.table_setup_column("source")
+            imgui.table_setup_column("event", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_setup_column("data")
+            imgui.table_headers_row()
+            for e in s.events[-400:]:
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_colored(v4(MUTED), f"{e.cycle:,}")
+                imgui.table_next_column()
+                if e.src == 0xFF:
+                    imgui.text_colored(v4(HIGH), "IRQ")
+                elif e.src < 4:
+                    imgui.text_colored(v4(SM_COLORS[e.src]), f"SM{e.src}")
+                else:
+                    imgui.text(f"{e.src}")
+                imgui.table_next_column()
+                imgui.text(e.name)
+                imgui.table_next_column()
+                if e.name.startswith("stall"):
+                    imgui.text(f"pc {e.data}")
+                elif e.name.startswith("irq"):
+                    imgui.text(f"flag {e.data}")
+                else:
+                    imgui.text(f"{e.data}")
+            if imgui.get_scroll_y() >= imgui.get_scroll_max_y() - 4:
+                imgui.set_scroll_here_y(1.0)
+            imgui.end_table()
+
     def analyzer(self):
         tr = self.s.trace
         n = min(len(tr), self.window)
@@ -439,6 +478,11 @@ class App:
                 spec.line_color = v4(SM_COLORS[sm])
                 spec.line_weight = 2
                 implot.plot_stairs(f"SM{sm} PC", xs, pcs[:, sm].astype(np.float64), spec)
+            stalls = [e for e in self.s.events if e.name == "stall begin" and xs[0] <= e.cycle <= xs[-1]]
+            if stalls:                                   # hardware trace: where each SM started stalling
+                spec = implot.Spec()
+                spec.line_color = v4(HIGH, 0.5)
+                implot.plot_inf_lines("stall (trace)", np.array([float(e.cycle) for e in stalls]), spec)
             implot.end_plot()
         del out
 
@@ -521,6 +565,7 @@ def main():
         win("State machines", "Right", app.state),
         win("Logic analyzer", "Bottom", app.analyzer),
         win("Terminal", "BottomRight", app.terminal),
+        win("Trace", "BottomRight", app.trace_view),
     ]
     rp.ini_disable = True                    # layout from code every start (saving: [SPEC-DBG-10], later)
     rp.docking_params.layout_condition = hello_imgui.DockingLayoutCondition.application_start

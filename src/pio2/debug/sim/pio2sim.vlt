@@ -3,6 +3,7 @@
 // @impl [SPEC-DBG-01] docs/DEBUGGER_SPECIFICATION.md
 public_flat_rd -module "asp_pio_tile" -var "*"
 public_flat_rd -module "asp_pio_sm" -var "*"
+public_flat_rd -module "pio2_core" -var "*"
 lint_off -rule WIDTHEXPAND
 lint_off -rule WIDTHTRUNC
 lint_off -rule SELRANGE

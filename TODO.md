@@ -33,7 +33,8 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
    2d. [ ] `pio2_core` with the fixed boundary ([SPEC-ICN-11]): AXI4-Lite slave, AXI-Stream in / out with
       the channel in `TDEST`, IRQ; both host adapters attach to it
    3. [ ] Tile: TLP adapters out (AbstractX wrapper with its WB->AXI4-Lite bridge), AXI-Stream FIFO
-      ports and event port in ([SPEC-ICN-09])
+      ports ([SPEC-ICN-09]); [x] observation port + `pio2_trace_tap` + `pio2_core` (tile, tap, event FIFO)
+      ([SPEC-TRC-03]), shown in the debugger's Trace window
    4. [ ] SPI PHY single / dual, SCK-clocked + async FIFO ([SPEC-LINK-01]), framer with CRC32
       ([SPEC-LINK-02]), NIC registers ([SPEC-LINK-07])
    5. [ ] Channel mux, credits, `INT_n` ([SPEC-LINK-03..05])

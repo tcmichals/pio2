@@ -1,10 +1,10 @@
 // Copyright (C) 2026 Tim Michals
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// libpio2sim: C ABI around the Verilator model of the unmodified asp_pio_tile.
-// @impl [SPEC-DBG-01] docs/DEBUGGER_SPECIFICATION.md
+// libpio2sim: C ABI around the Verilator model of pio2_core (unmodified tile + trace tap + event FIFO).
+// @impl [SPEC-DBG-01] [SPEC-DBG-13] docs/DEBUGGER_SPECIFICATION.md
 
-#include "Vasp_pio_tile.h"
+#include "Vpio2_core.h"
 #include "verilated.h"
 #include "verilated_vpi.h"
 #include "vpi_user.h"
@@ -17,11 +17,12 @@
 
 namespace {
 
-constexpr uint32_t kBase = 0x40000700u;
+constexpr uint32_t kBase = 0x00000000u;   // the tile's window in pio2_core
 
 struct Sim {
     VerilatedContext ctx;
-    Vasp_pio_tile* top;
+    Vpio2_core* top;
+    std::vector<uint64_t> events;   // trace records taken from the core's record stream
     uint64_t cycle = 0;
     uint32_t ext = 0;        // levels the parts drive
     uint32_t ext_mask = 0;   // lines the parts drive
@@ -36,7 +37,7 @@ struct Sim {
     std::vector<Rec> pending;
     bool record = false;
 
-    Sim() { top = new Vasp_pio_tile(&ctx, "TOP"); }
+    Sim() { top = new Vpio2_core(&ctx, "TOP"); }
     ~Sim() { top->final(); delete top; }
 
     uint32_t pads() const {
@@ -48,7 +49,8 @@ struct Sim {
     // One system clock: inputs settle, rising edge, falling edge.
     void step() {
         top->i_gpio = pads();
-        top->i_sys_timestamp = cycle;
+        top->eval();
+        if (top->m_trace_tvalid && top->m_trace_tready) events.push_back(top->m_trace_tdata);
         top->clk = 1;
         top->eval();
         ctx.timeInc(5);
@@ -75,7 +77,7 @@ Sim* g_sim = nullptr;   // VPI names one design per process
 vpiHandle lookup(Sim* s, const char* name) {
     auto it = s->handles.find(name);
     if (it != s->handles.end()) return it->second;
-    std::string full = std::string("TOP.asp_pio_tile.") + name;
+    std::string full = std::string("TOP.pio2_core.u_tile.") + name;
     vpiHandle h = vpi_handle_by_name(const_cast<PLI_BYTE8*>(full.c_str()), nullptr);
     s->handles.emplace(name, h);
     return h;
@@ -110,8 +112,8 @@ void* pio2sim_create() {
     Sim* s = g_sim;
     s->top->clk = 0;
     s->top->rst_n = 0;
-    s->top->m_tlp_tready = 1;
-    s->top->s_tlp_tvalid = 0;
+    s->top->i_trace_mask = 0xFFFFFFFFu;
+    s->top->m_trace_tready = 1;
     s->top->s_axil_awvalid = 0;
     s->top->s_axil_wvalid = 0;
     s->top->s_axil_arvalid = 0;
@@ -252,6 +254,31 @@ int pio2sim_get_index(void* h, const char* name, int index, uint32_t* words, int
     vpiHandle a = lookup(static_cast<Sim*>(h), name);
     if (!a) return -1;
     return read_handle(vpi_handle_by_index(a, index), words, nwords);
+}
+
+// Trace records ([SPEC-TRC-01] layout) taken from the core since the last drain.
+uint32_t pio2sim_events_pending(void* h) {
+    return static_cast<uint32_t>(static_cast<Sim*>(h)->events.size());
+}
+
+void pio2sim_events_drain(void* h, uint32_t n, uint64_t* out) {
+    Sim* s = static_cast<Sim*>(h);
+    n = n < s->events.size() ? n : static_cast<uint32_t>(s->events.size());
+    std::memcpy(out, s->events.data(), n * sizeof(uint64_t));
+    s->events.erase(s->events.begin(), s->events.begin() + n);
+}
+
+void pio2sim_trace_config(void* h, uint32_t type_mask, int ready) {
+    Sim* s = static_cast<Sim*>(h);
+    s->top->i_trace_mask = type_mask;
+    s->top->m_trace_tready = ready ? 1 : 0;
+    s->top->eval();
+}
+
+void pio2sim_trace_counters(void* h, uint32_t* dropped, uint32_t* merged) {
+    Sim* s = static_cast<Sim*>(h);
+    *dropped = s->top->o_trace_dropped;
+    *merged = s->top->o_trace_merged;
 }
 
 }  // extern "C"

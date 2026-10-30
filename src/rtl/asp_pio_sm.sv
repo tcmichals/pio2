@@ -62,7 +62,9 @@ module asp_pio_sm #(
     // Observability / Status
     output logic        o_exec_stalled,
     output logic        o_exec_latched,     // EXECCTRL.EXEC_STALLED: an SMx_INSTR waits
-    output logic        o_sm_active
+    output logic        o_sm_active,
+    output logic        o_tx_empty,         // observation for the trace tap ([SPEC-TRC-03])
+    output logic        o_rx_full
 );
 
     // ------------------------------------------------------------------------
@@ -167,6 +169,8 @@ module asp_pio_sm #(
     assign o_exec_latched = exec_pending && exec_forced;
     assign o_tx_ready     = tx_level != tx_cap;
     assign o_rx_rvalid    = rx_level != 4'd0;
+    assign o_tx_empty     = tx_level == 4'd0;
+    assign o_rx_full      = rx_level == rx_cap && rx_cap != 4'd0;
     assign o_rx_rdata     = fifo_mem[rx_idx(rx_rd_ptr, join_rx)];
 
     function automatic logic [31:0] bit_reverse(input logic [31:0] v);
