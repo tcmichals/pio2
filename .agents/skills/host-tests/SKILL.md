@@ -25,3 +25,6 @@ Every test passes.
 ## Evidence
 
 pytest summary line in the commit message.
+
+Ledger: `uv run pio2-trac --record` (add `--formal` / `--lint` for those skills) writes one record per
+requirement to `docs/verification/evidence/`, which the SpecTrace matrix turns into VERIFIED.

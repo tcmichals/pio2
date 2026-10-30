@@ -13,9 +13,11 @@ description: "Check skill. RTL is free of multi-driven signals, width errors and
 
 ```bash
 export PATH="$HOME/.tools/oss-cad-suite/bin:$PATH"
-for f in src/rtl/*.sv; do verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL \
-  -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Isrc/rtl src/rtl/*.sv \
-  --top-module $(basename $f .sv); done
+uv run pio2-trac --no-cocotb --lint     # every src/rtl/**/*.sv as top, the rest found through -y
+# by hand, one module:
+verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
+  -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -y src/rtl -y src/rtl/trace -y third_party/verilog-axis/rtl \
+  src/rtl/pio2_core.sv --top-module pio2_core
 ```
 
 ## Pass criteria
@@ -25,3 +27,6 @@ No `MULTIDRIVEN`, `SYNCASYNCNET` or `CASEINCOMPLETE`; width warnings reviewed.
 ## Evidence
 
 Lint output (warning count per module) in the commit message.
+
+Ledger: `uv run pio2-trac --record` (add `--formal` / `--lint` for those skills) writes one record per
+requirement to `docs/verification/evidence/`, which the SpecTrace matrix turns into VERIFIED.

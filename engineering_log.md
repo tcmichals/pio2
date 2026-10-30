@@ -165,3 +165,24 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Evidence**: `pytest tests/test_host_frame.py tests/test_trace_ctf.py` 46 passed.
 * **Not verified**: the RTL framer and DMA trace channel (not written); Trace Compass and AbstractX
   Studio opening the CTF; `barectf generate` on the YAML.
+
+## 2026-10-30: Evidence ledger for pio2 (`pio2-trac`), so the matrix can say VERIFIED
+
+* **Category**: `process-gap` (TODO item 7), `false-alarm` (rtl-lint skill command)
+* **What**: `src/pio2/trac.py` (`uv run pio2-trac [--record] [--formal] [--lint] [--no-cocotb]`) runs pytest
+  (JUnit XML, per file) and `pio2-cocotb` (per suite), optionally `sby ... bmc` per `tests/formal/*.sby`
+  and the RTL lint, maps every test file to its `@verifies` tags and writes one AbstractX-format
+  ledger record per requirement to `docs/verification/evidence/<YYYY-MM>/<host>.jsonl`; AbstractX's
+  `spectrace_matrix.py --matrix` reads them unchanged. A record is `pass` only when every skill on
+  the requirement's `Verified by` line ran for it and passed; a skill that did not run (board,
+  fpga-fit, a missing cocotb suite) gives `skip` = STALE. `--record` refuses a dirty tree, because
+  the record names HEAD and AbstractX's matrix does not look at the record's `dirty` field.
+* **Found**: the `rtl-lint` skill command globbed `src/rtl/*.sv` only, so `pio2_core` failed with
+  MODMISSING (its tap and FIFO are in `src/rtl/trace/`, `axis_fifo` in `third_party/`); the skill and
+  `pio2-trac --lint` now pass `-y` for those directories (7 modules clean).
+* **Found**: `[SPEC-TRC-03]` is BROKEN in the matrix: its `Verified by` note has `` `pull` `` in
+  backticks outside the parenthesis-stripped part, read as a skill name.
+* **Evidence**: `pytest tests/test_trac.py` 5 passed (incl. a throw-away git repo whose records the
+  real AbstractX matrix shows as VERIFIED 1 / STALE 1 / FAILING 1, then STALE after an impl change);
+  mutant (missing skills judged pass) -> 3 failed.
+* **Not verified**: records from a second machine merged with these (file per host, by design).

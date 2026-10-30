@@ -20,6 +20,7 @@ pio2-cocotb = "pio2.run_cocotb:main"
 pio2-gui = "pio2.gui.app:main"
 pio2-debug = "pio2.debug.cli:main"
 pio2-ctf = "pio2.trace.ctf:main"
+pio2-trac = "pio2.trac:main"
 
 [dependency-groups]
 dev = [
