@@ -247,6 +247,7 @@ dev = [
     { name = "cocotbext-axi" },
     { name = "pytest" },
     { name = "pyuvm" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -263,6 +264,7 @@ dev = [
     { name = "cocotbext-axi", specifier = ">=0.1.28" },
     { name = "pytest", specifier = ">=8" },
     { name = "pyuvm", specifier = ">=5.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 
 [[package]]

@@ -19,6 +19,7 @@ pio2-setup-tools = "pio2.setup_tools:main"
 pio2-cocotb = "pio2.run_cocotb:main"
 pio2-gui = "pio2.gui.app:main"
 pio2-debug = "pio2.debug.cli:main"
+pio2-ctf = "pio2.trace.ctf:main"
 
 [dependency-groups]
 dev = [
@@ -27,6 +28,7 @@ dev = [
     "cocotbext-axi>=0.1.28",
     "pytest>=8",
     "pyuvm>=5.0.0",
+    "pyyaml>=6.0.3",
 ]
 
 [build-system]

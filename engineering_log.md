@@ -139,3 +139,29 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   (no RX-full edges) fails `test_fifo_edges`.
 * **Not verified**: the tap and core under formal; the records through the DMA trace channel (no DMA
   yet); AbstractX lint with the new unconnected tile outputs (checked in the AbstractX commit).
+
+## 2026-10-30: Link frames on the host; trace records to CTF 1.8
+
+* **Category**: `process-gap` (feature), `tool-bug` (barectf, babeltrace2), `false-alarm` (one test)
+* **What**: `src/pio2/host/frame.py` ([SPEC-LINK-02]): frame encode / decode, CRC-32/ISO-HDLC written out
+  (equal to `zlib.crc32`), rejects (bad CRC, length, oversize, reserved, unknown op), transfers split
+  into STREAM_DATA / REG_WRITE / REG_READ frames. Op codes REG_READ..NAK = 0x01..0x06 chosen here.
+  `src/pio2/trace/ctf.py` + `barectf_config.yaml` ([SPEC-TRC-02]): records -> 64-bit timestamps
+  (nearest the previous record, +-2^31, so wraps and the event FIFO's priority reordering both work)
+  -> sorted -> CTF 1.8 (`metadata` + `stream_0`), read back with babeltrace2 2.0.5, also end to end
+  from a debugger Session (blink + IRQ toggler + a back-pressure stretch with a DROPPED record).
+* **Tool facts**: barectf 3.1.2 (latest on PyPI) does not install on Python 3.13: it pins PyYAML 5.4.1,
+  which has no wheel and no longer builds. So the YAML is checked against `ctf.EVENT_TYPES` by a test,
+  not by `barectf generate`. babeltrace2 reports a discarded-events count only as the difference
+  between two packets' `events_discarded`; a non-zero value in the first packet prints only "may have
+  discarded events", so the writer starts with an empty packet (snapshot 0). The warnings go to stderr.
+* **Tool fact (environment)**: a `uv run` killed during its first sync left this worktree's `.venv` with
+  a half-installed pygments (pytest failed on `pygments.plugin`); `uv sync --reinstall-package pygments`
+  fixed it. With several agents running uv at once, `uv run` waited minutes on the shared lock.
+* **False alarm (test)**: `blink` pulls once only (its wrap target is after the `pull`), so pushing
+  more words gives no more stall records; the end-to-end test uses an IRQ toggler for volume.
+* **Mutants**: decode without the length check (2 failures); `ordered` without sorting (2); timestamp
+  extension without wrap handling (2).
+* **Evidence**: `pytest tests/test_host_frame.py tests/test_trace_ctf.py` 46 passed.
+* **Not verified**: the RTL framer and DMA trace channel (not written); Trace Compass and AbstractX
+  Studio opening the CTF; `barectf generate` on the YAML.
