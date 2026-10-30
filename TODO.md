@@ -32,10 +32,24 @@ Unmerged work, in branches (each has its own commits and a report in its last co
   ledger", point [SPEC-TRC-02] Verified-by at tests/test_trace_ctf.py, align [SPEC-DBG-13]). After the
   merge re-run `uv run pio2-trac --record --formal --lint` on a clean tree and commit the ledger.
 * `worktree-agent-aa5ce2bdeac89fae2`: debugger M3-M7, ESC examples, conformance in the debugger
-  (TODO items 2, 3). **Stopped mid-work**: only its first commit (7908888, conformance programs in the
-  debugger) is on the branch; uncommitted work may be in `.claude/worktrees/agent-aa5ce2bdeac89fae2/`.
-  It was written against the OLD pio2_core (trace port); when merging, Session's trace now comes from
-  channel 1 of the core's output stream (`pio2sim.cpp`, `session.py` on main).
+  (TODO items 2, 3). Stopped mid-work. Two commits: 7908888 (conformance programs stepped in the
+  debugger, tested) and 99d587f (WIP, **untested**: more parts, stimulus generators, example sessions
+  with diagrams for 12 programs, snapshots for reverse step, bench / part / diagram modules; ~900
+  changed lines + new files). Written against the OLD pio2_core (trace record port, i_trace_mask);
+  main moved the trace to channel 1 of the core's output stream (`pio2sim.cpp`, `session.py`), so
+  merge those two files by hand and run `uv run pytest tests -q`.
+
+How to resume:
+```bash
+cd /media/tcmichals/projects/pio2
+git log --oneline -8                                     # main: 0d83c24 and earlier
+git merge --no-ff worktree-agent-a1f543a2c9553e1ee       # 1. host frames / CTF / ledger
+git merge --no-ff worktree-agent-aa5ce2bdeac89fae2       # 4. debugger (conflicts in session.py, pio2sim.cpp)
+export PATH=$HOME/.tools/oss-cad-suite/bin:$PATH
+uv run pytest tests -q && uv run pio2-cocotb && uv run pio2-cocotb --sim icarus
+git worktree remove .claude/worktrees/agent-*            # once merged (use --force if needed)
+```
+Use `git status --ignore-submodules=all` (plain `git status` / `git stash` hang on this disk).
 
 Uncommitted-then-committed draft (this commit): **SPI link RTL, untested, not in any build**
 * `src/rtl/link/pio2_spi_phy.sv` (SCK domain, two frame buffers per direction, handover while CS_n
