@@ -29,6 +29,7 @@ MUTED = (0.55, 0.59, 0.66)
 ACCENT = (0.18, 0.80, 0.72)            # teal
 HIGH = (1.00, 0.70, 0.20)              # driven high: amber
 LOW = (0.25, 0.42, 0.85)               # driven low: blue
+STEP_LIMIT = 10_000                    # a stalled SM must not freeze the GUI
 SM_COLORS = [(0.18, 0.80, 0.72), (1.0, 0.55, 0.35), (0.65, 0.55, 1.0), (0.95, 0.40, 0.65)]
 
 
@@ -100,6 +101,7 @@ class App:
         self.window = 600                   # clocks shown in the logic analyzer
         self.f_sys = 125e6
         self.sel_sm = 0
+        self.step_note = ""
         self.load_example(example)
 
     # ------------------------------------------------------------ model
@@ -134,7 +136,11 @@ class App:
         imgui.same_line()
         if imgui.button(f"Step instr SM{self.sel_sm}"):
             if s.sm_state(self.sel_sm)["enabled"]:
-                s.step_instr(self.sel_sm)
+                n = s.step_instr(self.sel_sm, limit=STEP_LIMIT)
+                self.step_note = (f"SM{self.sel_sm} still stalled after {n:,} clocks (nothing retired)"
+                                  if n >= STEP_LIMIT else "")
+            else:
+                self.step_note = f"SM{self.sel_sm} is disabled"
             for p in self.ex.parts:
                 p.update(s)
         imgui.end_disabled()
@@ -157,6 +163,9 @@ class App:
         imgui.text_colored(v4(ACCENT), f"cycle {s.cycle:,}")
         imgui.same_line()
         imgui.text_colored(v4(MUTED), f"{t * 1e6:,.2f} us at {self.f_sys / 1e6:.0f} MHz")
+        if self.step_note:
+            imgui.same_line()
+            imgui.text_colored(v4(HIGH), self.step_note)
 
     def source(self):
         s = self.s
