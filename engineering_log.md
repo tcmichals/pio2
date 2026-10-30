@@ -192,3 +192,37 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   `bmc` depth 40 on the unmodified tile: PASS, 99 s.
 * **Not verified**: the AXI-Stream FIFO ports under `faxis_*` (not bound yet); liveness beyond
   faxil_slave's 12-clock MAXDELAY / MAXWAIT bounds.
+
+## 2026-10-30: Icarus as the second simulator; the ISA cases as a cocotb suite [SPEC-PIO-02]
+
+* **Category**: `tool-bug` (2), `product-bug` (portability), `process-gap`
+* **What**: the RP2040 opcode / operand cases moved out of `tests/test_isa_every_opcode.py` into
+  `src/pio2/isa_cases.py` (case table, datasheet rules, coverage set), written against a small blocking
+  `hw` interface. The pytest file runs them on the debugger's Verilator model as before; the new
+  `tests/cocotb/test_isa_every_opcode_cocotb.py` runs the same 383 cases + coverage gate through the
+  AXI4-Lite port (cocotbext-axi) on Icarus and Verilator, each case in a cocotb `bridge` thread with
+  every hardware access `resume`d. All 8 cocotb suites now pass on both simulators.
+* **Portability (RTL)**: Icarus rejected `asp_pio_tile.sv` (`Unable to bind wire/reg/memory
+  sm_stalled ... Check for declaration after use`): `o_obs_stalled` / `o_obs_active` were assigned
+  before `sm_stalled` / `sm_active` were declared. Verilator and Yosys accept that; IEEE 1800 does not.
+  The two `assign` lines moved below the declarations (no other change).
+* **Tool bug (flags)**: the Makefile passed Verilator's `-Wno-*` options to every simulator; they now go
+  to Verilator only, Icarus gets `-I` and `-G` parameters as `-P<top>.<name>`.
+* **Tool bug (oss-cad-suite)**: its `bin/vvp` is a wrapper that runs vvp on oss-cad-suite's own libc /
+  libm; cocotb's VPI library then loads the system libpython, which needs the system glibc, and vvp
+  stops with "GLIBC_2.38 not found". `pio2-cocotb --sim icarus` now points cocotb (`ICARUS_BIN_DIR`)
+  at the real binary `libexec/vvp`, which runs on the system libraries.
+* **Bench differences found**: Icarus starts with X on the AXI outputs, so cocotbext-axi must be
+  created after a clock in reset ("Cannot convert Logic('X') to bool" otherwise); state is read after a
+  falling edge, so both simulators see the values after the last rising edge.
+* **Case changes (both benches)**: the 4 `out exec` cases with fewer than 16 bits were skips and are
+  left out of the table (383 cases, was 387 incl. 4 skips). The delay case now holds the program on
+  `wait 1 gpio 0` and counts the clocks X reads 1 (exactly delay + 1), instead of reading the
+  debugger's PC trace, which the cocotb bench does not have. `mov` operands come from a fixed CRC
+  seed (they came from Python's `hash()` of strings, which changes per process). `reset` also
+  releases the externally driven pins (the delay case found a pin left high by the previous case).
+* **Evidence**: pytest 441 passed; `pio2-cocotb --sim icarus` 8/8 (ISA 384/384); `pio2-cocotb` 8/8
+  (ISA 384/384); mutant `jmp x!=y` inverted fails the cocotb suite on Icarus with 6 failures (5 cases +
+  coverage gate), as in pytest.
+* **Not verified**: Icarus 12 (Ubuntu's `/usr/bin`) — only oss-cad-suite's Icarus 13 was run; the
+  other two pytest mutants (`mov status`, `mov ::`) were not re-run on the cocotb suite.

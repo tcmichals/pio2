@@ -132,7 +132,10 @@ flowchart TD
   above with `pioasm` output; first failing case on 2026-10-27: `pull block` advanced the PC), `host-tests`
   (`tests/test_isa_every_opcode.py`, 2026-10-29: every RP2040 opcode and operand executed on the
   Verilator model of the RTL and compared with the datasheet rule; a coverage test fails if any
-  combination has no case; three RTL mutants caught)
+  combination has no case; three RTL mutants caught), `cocotb-regression`
+  (`tests/cocotb/test_isa_every_opcode_cocotb.py`, 2026-10-30: the same cases, from the shared table
+  `src/pio2/isa_cases.py`, through the AXI4-Lite port on Icarus and on Verilator, with the same
+  coverage gate)
 * **Implementation Target**: `src/rtl/asp_pio_sm.sv`
 
 ### `[SPEC-PIO-03]` Internal IRQ Bus & Supervisor/Worker State Machine Chaining

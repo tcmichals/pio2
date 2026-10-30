@@ -24,6 +24,12 @@ endif
 # Same Verilator flags as the AbstractX regression, so results compare one to one.
 SIM_PARAMS ?=
 TRACE ?=
+ifeq ($(SIM),verilator)
 EXTRA_ARGS += $(TRACE) -I$(RTL_DIR) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-SELRANGE -Wno-PINCONNECTEMPTY -Wno-UNUSEDPARAM $(SIM_PARAMS)
+else ifeq ($(SIM),icarus)
+# Icarus (second simulator): SystemVerilog 2012 (cocotb adds -g2012); -G overrides go through
+# COMPILE_ARGS as -P<top>.<name>=<value>.
+COMPILE_ARGS += -I$(RTL_DIR) $(patsubst -G%,-P$(TOPLEVEL).%,$(SIM_PARAMS))
+endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
