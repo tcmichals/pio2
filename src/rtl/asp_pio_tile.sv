@@ -195,8 +195,6 @@ module asp_pio_tile #(
     assign irq_view = (irq_flags | combined_irq_set) & ~combined_irq_clr;
     // @impl [SPEC-TRC-03] docs/INTERCONNECT_SPECIFICATION.md
     assign o_obs_irq     = irq_flags;
-    assign o_obs_stalled = sm_stalled;
-    assign o_obs_active  = sm_active;
 
     // ------------------------------------------------------------------------
     // Tile-Level Configuration & Status Registers
@@ -249,6 +247,8 @@ module asp_pio_tile #(
     logic [3:0]  sm_stalled;
     logic [3:0]  sm_exec_latched;
     logic [3:0]  sm_active;
+    assign o_obs_stalled = sm_stalled;     // after the declarations (Icarus: no use before declaration)
+    assign o_obs_active  = sm_active;
 
     // SMx_INSTR: immediate instruction per state machine
     logic [15:0] sm_exec_instr [0:3];

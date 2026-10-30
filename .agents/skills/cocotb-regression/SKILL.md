@@ -14,6 +14,7 @@ description: "Check skill. RTL behaviour of the PIO tile and the pio2 interconne
 ```bash
 uv run pio2-cocotb                 # every tests/cocotb/test_*_cocotb.py on Verilator
 uv run pio2-cocotb --only dshot    # a subset
+uv run pio2-cocotb --sim icarus    # the same suites on Icarus (second simulator)
 ```
 
 Each suite runs in a temporary copy (no `sim_build/` in the repository). Simulators come from

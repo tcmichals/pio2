@@ -1,15 +1,16 @@
 # Formal check of the PIO tile's AXI4-Lite port with ZipCPU's faxil_slave ([SPEC-AXI-04], [SPEC-VER-01]).
-#   cd tests/formal && sby -f pio_tile_axil.sby bmc     # bounded, 24 clocks
+#   cd tests/formal && sby -f pio_tile_axil.sby bmc     # bounded, 40 clocks (reset alone takes 16)
 #   cd tests/formal && sby -f pio_tile_axil.sby prove   # k-induction (unbounded)
+# The induction invariants are in pio_tile_axil.sv (`ifdef FORMAL), stated on the tile ports only.
 [tasks]
 bmc
 prove
 
 [options]
 bmc: mode bmc
-bmc: depth 24
+bmc: depth 40
 prove: mode prove
-prove: depth 24
+prove: depth 40
 multiclock off
 
 [engines]

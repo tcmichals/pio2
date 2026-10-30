@@ -145,8 +145,10 @@ AXI4-Lite crossbar, like every other block.
   are whole 32-bit words: a write with `WSTRB` other than `4'hF` changes nothing and answers `SLVERR`.
 * **Requirement**: the move keeps behaviour: every existing tile test (tile, conformance, DShot, ESC
   serial) passes through the AXI4-Lite port, driven by cocotbext-axi, before and after.
-* **Verified by**: `cocotb-regression` (all tile suites through the AXI4-Lite port), `formal-check`
-  (ZipCPU `faxil_slave` on the tile port)
+* **Verified by**: `cocotb-regression` (all tile suites through the AXI4-Lite port, on Verilator and
+  Icarus), `formal-check` (ZipCPU `faxil_slave` on the tile port, `tests/formal/pio_tile_axil.sby`:
+  BMC depth 24 and, since 2026-10-30, k-induction, which closes at k = 8 with the port invariants in
+  `tests/formal/pio_tile_axil.sv`)
 * **Implementation Target**: `src/rtl/asp_pio_tile.sv`
 
 ## 3. Host link

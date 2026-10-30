@@ -194,3 +194,65 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   `sby pio2_axil_regs.sby bmc` and `prove` (k-induction) pass; two mutants (BVALID dropped without
   BREADY, ARREADY while RVALID pending) fail on ZipCPU's own properties with the invariants removed.
 * **Not verified**: AXI-Stream ports under faxis properties; Icarus for the new suites; synthesis.
+
+## 2026-10-30: k-induction closes on the tile's AXI4-Lite port [SPEC-AXI-04]
+
+* **Category**: `process-gap` (proof was bounded only), `false-alarm` (the 25-minute "slow" induction)
+* **What**: `tests/formal/pio_tile_axil.sv` gained five formal-only assertions (`ifdef FORMAL`), all on
+  the tile's ports, none in the RTL: faxil_slave's outstanding counters equal "held + response
+  pending", i.e. `f_awr == !AWREADY + BVALID`, `f_wr == !WREADY + BVALID`, `f_rd == !ARREADY + RVALID`
+  (the front end's `aw_held` / `w_held` / `ar_held` are exactly the inverted READY outputs), and the
+  responses are OKAY / SLVERR (B) and OKAY (R). No invariant on `req_busy` / `wb_ack_o` was needed:
+  an unreachable internal state turns into a violation of the port invariants within 3 clocks.
+* **Why the old run never finished**: without the invariants the solver keeps finding unreachable
+  starting states (e.g. `aw_held` set with no AW counted), so induction fails at every depth and each
+  step only gets slower; it was not a size problem. Shown: the same run with the five assertions
+  compiled out ends UNKNOWN after 7 min (induction counterexample from an unreachable state:
+  `faxil_slave.v:598`, read counter at its limit with ARREADY high). With them: `sby -f pio_tile_axil.sby prove`
+  PASS, induction closes at k = 8 (smtbmc yices, "Trying induction in step 32 .. Temporal induction
+  successful" at depth 40), whole design (all four SMs), 116 s wall, of which the induction takes ~5 s
+  and the base case (BMC 40) the rest.
+* **Depth raised 24 -> 40** for both tasks: faxil_slave holds reset for 16 clocks, so depth 24 left 8
+  clocks of traffic, too few for two reads in a row. Mutant "read starts while RVALID is pending"
+  (`read_ready = ar_held`) PASSED the depth-24 base case and only showed up as an induction
+  counterexample (UNKNOWN after 8 min); at depth 40 it FAILs the base case at step 25 in 30 s. Lesson:
+  check that the BMC depth minus the reset length covers two back-to-back transactions.
+* **Mutants (prove, depth 40)**: BVALID dropped without BREADY (`if (s_axil_bvalid) s_axil_bvalid <=
+  0`): FAIL, base case step 20, 42 s. Read issued while RVALID pending: FAIL, base case step 25, 30 s.
+  `bmc` depth 40 on the unmodified tile: PASS, 99 s.
+* **Not verified**: the AXI-Stream FIFO ports under `faxis_*` (not bound yet); liveness beyond
+  faxil_slave's 12-clock MAXDELAY / MAXWAIT bounds.
+
+## 2026-10-30: Icarus as the second simulator; the ISA cases as a cocotb suite [SPEC-PIO-02]
+
+* **Category**: `tool-bug` (2), `product-bug` (portability), `process-gap`
+* **What**: the RP2040 opcode / operand cases moved out of `tests/test_isa_every_opcode.py` into
+  `src/pio2/isa_cases.py` (case table, datasheet rules, coverage set), written against a small blocking
+  `hw` interface. The pytest file runs them on the debugger's Verilator model as before; the new
+  `tests/cocotb/test_isa_every_opcode_cocotb.py` runs the same 383 cases + coverage gate through the
+  AXI4-Lite port (cocotbext-axi) on Icarus and Verilator, each case in a cocotb `bridge` thread with
+  every hardware access `resume`d. All 8 cocotb suites now pass on both simulators.
+* **Portability (RTL)**: Icarus rejected `asp_pio_tile.sv` (`Unable to bind wire/reg/memory
+  sm_stalled ... Check for declaration after use`): `o_obs_stalled` / `o_obs_active` were assigned
+  before `sm_stalled` / `sm_active` were declared. Verilator and Yosys accept that; IEEE 1800 does not.
+  The two `assign` lines moved below the declarations (no other change).
+* **Tool bug (flags)**: the Makefile passed Verilator's `-Wno-*` options to every simulator; they now go
+  to Verilator only, Icarus gets `-I` and `-G` parameters as `-P<top>.<name>`.
+* **Tool bug (oss-cad-suite)**: its `bin/vvp` is a wrapper that runs vvp on oss-cad-suite's own libc /
+  libm; cocotb's VPI library then loads the system libpython, which needs the system glibc, and vvp
+  stops with "GLIBC_2.38 not found". `pio2-cocotb --sim icarus` now points cocotb (`ICARUS_BIN_DIR`)
+  at the real binary `libexec/vvp`, which runs on the system libraries.
+* **Bench differences found**: Icarus starts with X on the AXI outputs, so cocotbext-axi must be
+  created after a clock in reset ("Cannot convert Logic('X') to bool" otherwise); state is read after a
+  falling edge, so both simulators see the values after the last rising edge.
+* **Case changes (both benches)**: the 4 `out exec` cases with fewer than 16 bits were skips and are
+  left out of the table (383 cases, was 387 incl. 4 skips). The delay case now holds the program on
+  `wait 1 gpio 0` and counts the clocks X reads 1 (exactly delay + 1), instead of reading the
+  debugger's PC trace, which the cocotb bench does not have. `mov` operands come from a fixed CRC
+  seed (they came from Python's `hash()` of strings, which changes per process). `reset` also
+  releases the externally driven pins (the delay case found a pin left high by the previous case).
+* **Evidence**: pytest 441 passed; `pio2-cocotb --sim icarus` 8/8 (ISA 384/384); `pio2-cocotb` 8/8
+  (ISA 384/384); mutant `jmp x!=y` inverted fails the cocotb suite on Icarus with 6 failures (5 cases +
+  coverage gate), as in pytest.
+* **Not verified**: Icarus 12 (Ubuntu's `/usr/bin`) — only oss-cad-suite's Icarus 13 was run; the
+  other two pytest mutants (`mov status`, `mov ::`) were not re-run on the cocotb suite.

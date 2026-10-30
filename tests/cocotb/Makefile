@@ -16,7 +16,7 @@ AXIS_DIR = $(PIO2_ROOT)/third_party/verilog-axis/rtl
 CORE_FILES = $(addprefix $(PIO2_ROOT)/,$(shell grep -v '^\#' $(PIO2_ROOT)/src/rtl/pio2_core.f))
 
 ifeq ($(TOPLEVEL),pio2_core)
-VERILOG_SOURCES = $(PIO2_ROOT)/src/rtl/third_party.vlt $(CORE_FILES)
+VERILOG_SOURCES = $(if $(filter verilator,$(SIM)),$(PIO2_ROOT)/src/rtl/third_party.vlt) $(CORE_FILES)
 ifeq ($(MODULE),test_pio2_dma_cocotb)
 SIM_PARAMS ?= -GRING_WORDS=16
 endif
@@ -33,6 +33,12 @@ endif
 # Same Verilator flags as the AbstractX regression, so results compare one to one.
 SIM_PARAMS ?=
 TRACE ?=
+ifeq ($(SIM),verilator)
 EXTRA_ARGS += $(TRACE) -I$(RTL_DIR) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-SELRANGE -Wno-PINCONNECTEMPTY -Wno-UNUSEDPARAM $(SIM_PARAMS)
+else ifeq ($(SIM),icarus)
+# Icarus (second simulator): SystemVerilog 2012 (cocotb adds -g2012); -G overrides go through
+# COMPILE_ARGS as -P<top>.<name>=<value>.
+COMPILE_ARGS += -I$(RTL_DIR) $(patsubst -G%,-P$(TOPLEVEL).%,$(SIM_PARAMS))
+endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim

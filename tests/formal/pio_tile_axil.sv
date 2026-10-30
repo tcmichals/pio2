@@ -62,7 +62,24 @@ module pio_tile_axil (
         .i_axi_rvalid(rvalid), .i_axi_rready(s_axil_rready), .i_axi_rdata(rdata), .i_axi_rresp(rresp),
         .f_axi_rd_outstanding(f_rd), .f_axi_wr_outstanding(f_wr), .f_axi_awr_outstanding(f_awr)
     );
-    wire _unused = &{1'b0, gpio_out, gpio_dir, tx_tready, rx_tvalid, rx_tdata, irq, obs_pc, obs_stalled,
+
+`ifdef FORMAL
+    // Invariants for k-induction. The front end holds at most one AW, one W and one AR (each held
+    // flag is the inverted READY output) and at most one B and one R response. faxil_slave counts each
+    // handshake until its response is accepted, so out of reset its outstanding counters equal
+    // "held + response pending" on every clock. Stated on the ports only: the tile carries no formal
+    // code. Unreachable internal states (a request in flight without its held flag, a response raised
+    // twice) break one of these within 3 clocks, well inside the induction depth.
+    always @(*)
+        if (rst_n) begin
+            assert(f_awr == {3'd0, !awready} + {3'd0, bvalid});
+            assert(f_wr  == {3'd0, !wready}  + {3'd0, bvalid});
+            assert(f_rd  == {3'd0, !arready} + {3'd0, rvalid});
+            assert(!bvalid || bresp == 2'b00 || bresp == 2'b10);   // OKAY, or SLVERR on a partial write
+            assert(!rvalid || rresp == 2'b00);
+        end
+`endif
+    wire _unused =&{1'b0, gpio_out, gpio_dir, tx_tready, rx_tvalid, rx_tdata, irq, obs_pc, obs_stalled,
                      obs_tx_empty, obs_rx_full, obs_active, obs_irq, f_rd, f_wr, f_awr};
 endmodule
 `default_nettype wire

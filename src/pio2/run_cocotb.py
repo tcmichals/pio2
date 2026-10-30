@@ -41,6 +41,27 @@ def tool_path():
     return os.pathsep.join([str(venv_bin), str(oss), os.environ.get("PATH", "")])
 
 
+def icarus_bin(tmp):
+    """A directory with `iverilog` and `vvp` for cocotb's Makefile.icarus (ICARUS_BIN_DIR), or None.
+
+    oss-cad-suite's bin/vvp is a wrapper that runs vvp with oss-cad-suite's own libc / libm and
+    PYTHONHOME; cocotb's VPI library then loads the venv's libpython, which needs the system glibc,
+    and vvp aborts ("GLIBC_2.38 not found"). The real binary (libexec/vvp) runs on the system
+    libraries, so it is linked next to the iverilog wrapper (which only compiles)."""
+    oss = Path(os.environ.get("PIO2_TOOLS", Path.home() / ".tools")) / "oss-cad-suite"
+    vvp = oss / "libexec" / "vvp"
+    if not (vvp.exists() and (oss / "bin" / "iverilog").exists()):
+        return None                                 # use whatever iverilog / vvp PATH has
+    d = Path(tmp) / "icarus-bin"
+    if not d.exists():
+        d.mkdir()
+        (d / "vvp").symlink_to(vvp)
+        wrapper = d / "iverilog"                    # the oss-cad-suite wrapper finds its lib/ from its own path
+        wrapper.write_text(f'#!/bin/sh\nexec "{oss / "bin" / "iverilog"}" "$@"\n')
+        wrapper.chmod(0o755)
+    return d
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument("--only", default="", help="run suites whose name contains this text")
@@ -60,6 +81,8 @@ def main():
         shutil.copytree(ROOT / "src", work / "src")
         shutil.copytree(TESTS, work / "tests" / "cocotb")
         cwd = work / "tests" / "cocotb"
+        if a.sim == "icarus" and (ib := icarus_bin(tmp)):
+            env["ICARUS_BIN_DIR"] = str(ib)
         for name in names:
             shutil.rmtree(cwd / "sim_build", ignore_errors=True)
             top = re.search(r"^# cocotb-toplevel:\s*(\S+)", (cwd / f"{name}.py").read_text(), re.M)
