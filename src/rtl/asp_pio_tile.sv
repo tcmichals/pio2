@@ -3,26 +3,22 @@
 
 `default_nettype none
 
-// AbstractX High-Performance PIO Tile Subsystem
+// pio2 PIO tile
 //
-// Features:
-// 1. Quad Concurrent State Machines (SM0..SM3) with RP2040 ISA compatibility.
-// 2. Shared 32-word x 16-bit Dual-Port Instruction Memory.
-// 3. Internal 8-bit IRQ Bus (irq 0..7) for Supervisor/Worker State Machine Chaining.
-// 4. Integrated 64-Byte TLP Packetizer Shim directly driving asp_router.sv.
-// 5. Autonomous barectf CTF 1.8 Timeline Trace generation (Stream 5).
-// 6. Wishbone B4 Pipelined Slave Interface (Base Address: 0x40000700).
+// 1. Four state machines (SM0..SM3), RP2040 ISA.
+// 2. Shared 32-word x 16-bit instruction memory.
+// 3. Internal 8-bit IRQ bus (irq 0..7) for supervisor / worker chaining.
+// 4. AXI4-Lite register port ([SPEC-AXI-04]).
+// 5. Per SM an AXI-Stream TX input and RX output on its FIFOs, for the DMA engine ([SPEC-ICN-09]).
+// 6. Read-only observation port for the trace tap ([SPEC-TRC-03]).
 //
-// @impl [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-04] [SPEC-PIO-05] [SPEC-PIO-07] [SPEC-PIO-10] docs/SPECIFICATION.md
+// @impl [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-05] docs/SPECIFICATION.md
+// @impl [SPEC-ICN-09] docs/INTERCONNECT_SPECIFICATION.md
 module asp_pio_tile #(
-    parameter logic [31:0] BASE_ADDR = 32'h40000700,
-    parameter int          TILE_ID   = 0
+    parameter logic [31:0] BASE_ADDR = 32'h40000700
 ) (
     input  wire          clk,
     input  wire          rst_n,
-
-    // Monotonic 64-bit nanosecond system timebase
-    input  wire [63:0]   i_sys_timestamp,
 
     // External Physical GPIO Pins (32-bit bus)
     input  wire [31:0]   i_gpio,
@@ -48,15 +44,14 @@ module asp_pio_tile #(
     output logic         s_axil_rvalid,
     input  wire          s_axil_rready,
 
-    // Ingress 512-bit TLPs from asp_router.sv ([SPEC-PIO-10])
-    input  wire [511:0]  s_tlp_tdata,
-    input  wire          s_tlp_tvalid,
-    output logic         s_tlp_tready,
-
-    // Egress 512-bit (64-Byte) AXI-Stream to asp_router.sv
-    output logic [511:0] m_tlp_tdata,
-    output logic         m_tlp_tvalid,
-    input  wire          m_tlp_tready,
+    // AXI-Stream FIFO ports, SM n in [32n+31:32n] / bit n ([SPEC-ICN-09]): TREADY = TX not full,
+    // TVALID = RX not empty; held off in a clock where the register port uses the same FIFO
+    input  wire  [127:0] s_axis_tx_tdata,
+    input  wire  [3:0]   s_axis_tx_tvalid,
+    output logic [3:0]   s_axis_tx_tready,
+    output logic [127:0] m_axis_rx_tdata,
+    output logic [3:0]   m_axis_rx_tvalid,
+    input  wire  [3:0]   m_axis_rx_tready,
 
     // Hardware Tile Interrupt Request to CPU
     output logic         o_pio_irq,
@@ -66,6 +61,7 @@ module asp_pio_tile #(
     output logic [3:0]   o_obs_stalled,
     output logic [3:0]   o_obs_tx_empty,
     output logic [3:0]   o_obs_rx_full,
+    output logic [3:0]   o_obs_active,
     output logic [7:0]   o_obs_irq
 );
 
@@ -91,6 +87,8 @@ module asp_pio_tile #(
     assign s_axil_arready = !ar_held;
     assign wb_cyc_i = req_busy;
     assign wb_stb_i = req_busy;
+    wire wb_sel = wb_cyc_i && wb_stb_i;
+    wire [11:0] reg_offset = wb_adr_i[11:0] - BASE_ADDR[11:0];
 
     wire write_ready = aw_held && w_held && !s_axil_bvalid;
     wire read_ready  = ar_held && !s_axil_rvalid;
@@ -198,6 +196,7 @@ module asp_pio_tile #(
     // @impl [SPEC-TRC-03] docs/INTERCONNECT_SPECIFICATION.md
     assign o_obs_irq     = irq_flags;
     assign o_obs_stalled = sm_stalled;
+    assign o_obs_active  = sm_active;
 
     // ------------------------------------------------------------------------
     // Tile-Level Configuration & Status Registers
@@ -211,18 +210,7 @@ module asp_pio_tile #(
     logic [31:0] sm_shiftctrl [0:3];
     logic [31:0] sm_pinctrl   [0:3];
 
-    // TLP data path registers ([SPEC-PIO-10])
-    logic        tlp_en;
-    logic [3:0]  out_mask;
-    logic [7:0]  tlp_tag;
-    logic [7:0]  tlp_channel;
-    logic [3:0]  burst_words;
-    logic        trace_en;
-    logic [23:0] out_timeout;
-    logic        in_en;
-    logic [7:0]  in_channel;
-
-    // FIFO Interface wires per State Machine: Wishbone and the TLP path share each FIFO port
+    // FIFO interface per state machine: the register port and the stream ports share each FIFO
     logic [31:0] wb_tx_wdata  [0:3];
     logic [3:0]  wb_tx_wvalid;
     logic [31:0] sm_tx_wdata  [0:3];
@@ -234,17 +222,20 @@ module asp_pio_tile #(
     logic [3:0]  wb_rx_ren;
     logic [3:0]  sm_rx_ren;
 
-    logic [3:0]   in_tx_wvalid;
-    logic [127:0] in_tx_wdata;
-    logic [3:0]   out_rx_pop;
-    logic [5:0]   in_queued;
-    logic         in_busy;
-
+    // @impl [SPEC-ICN-09] docs/INTERCONNECT_SPECIFICATION.md
+    // wb_tx_wvalid / wb_rx_ren are the register port's FIFO strobes in this clock; the stream port
+    // is held off in that clock, so each word is taken or delivered exactly once. An RXF read pops in
+    // the clock its data is captured (wb_rx_ren is combinational): with a registered pop one clock
+    // later, the stream could take the captured word in between and the pop would drop the next one.
     always_comb begin
         for (int s = 0; s < 4; s++) begin
-            sm_tx_wvalid[s] = wb_tx_wvalid[s] | in_tx_wvalid[s];
-            sm_tx_wdata[s]  = in_tx_wvalid[s] ? in_tx_wdata[32 * s +: 32] : wb_tx_wdata[s];
-            sm_rx_ren[s]    = wb_rx_ren[s] | out_rx_pop[s];
+            wb_rx_ren[s] = wb_sel && !wb_ack_o && !wb_we_i && reg_offset == 12'(12'h114 + 12'h020 * s);
+            s_axis_tx_tready[s]       = sm_tx_ready[s] && !wb_tx_wvalid[s];
+            m_axis_rx_tvalid[s]       = sm_rx_rvalid[s] && !wb_rx_ren[s];
+            m_axis_rx_tdata[32*s +: 32] = sm_rx_rdata[s];
+            sm_tx_wvalid[s] = wb_tx_wvalid[s] | (s_axis_tx_tvalid[s] && s_axis_tx_tready[s]);
+            sm_tx_wdata[s]  = wb_tx_wvalid[s] ? wb_tx_wdata[s] : s_axis_tx_tdata[32*s +: 32];
+            sm_rx_ren[s]    = wb_rx_ren[s] | (m_axis_rx_tvalid[s] && m_axis_rx_tready[s]);
         end
     end
 
@@ -330,62 +321,11 @@ module asp_pio_tile #(
     endgenerate
 
     // ------------------------------------------------------------------------
-    // TLP data path ([SPEC-PIO-10]): ingress queue -> TX FIFOs, RX FIFOs -> egress TLPs + trace
-    // ------------------------------------------------------------------------
-    logic sm_trigger_pulse;
-
-    asp_pio_tlp_ingress u_tlp_ingress (
-        .clk          (clk),
-        .rst_n        (rst_n),
-        .i_en         (in_en),
-        .i_channel    (in_channel),
-        .s_tlp_tdata  (s_tlp_tdata),
-        .s_tlp_tvalid (s_tlp_tvalid),
-        .s_tlp_tready (s_tlp_tready),
-        .i_tx_ready   (sm_tx_ready),
-        .i_tx_block   (wb_tx_wvalid),
-        .o_tx_wvalid  (in_tx_wvalid),
-        .o_tx_wdata   (in_tx_wdata),
-        .o_queued     (in_queued),
-        .o_busy       (in_busy)
-    );
-
-    asp_pio_tlp_shim #(
-        .BASE_ADDR(BASE_ADDR)
-    ) u_tlp_shim (
-        .clk             (clk),
-        .rst_n           (rst_n),
-        .i_sys_timestamp (i_sys_timestamp),
-        .i_tlp_en        (tlp_en),
-        .i_mask          (out_mask),
-        .i_tlp_tag       (tlp_tag),
-        .i_tlp_channel   (tlp_channel),
-        .i_burst_words   (burst_words),
-        .i_idle_timeout  (out_timeout),
-        .i_trace_en      (trace_en),
-        .i_tile_id       (8'(TILE_ID)),
-        .i_rx_data       ({sm_rx_rdata[3], sm_rx_rdata[2], sm_rx_rdata[1], sm_rx_rdata[0]}),
-        .i_rx_valid      (sm_rx_rvalid),
-        .i_rx_block      (wb_rx_ren),
-        .o_rx_pop        (out_rx_pop),
-        .i_sm_trigger    (sm_trigger_pulse),
-        .i_sm_active     (sm_active),
-        .i_sm_stalled    (sm_stalled),
-        .i_sm_pc         ({sm_pc[3], sm_pc[2], sm_pc[1], sm_pc[0]}),
-        .i_irq_pulse     (combined_irq_set),
-        .m_tlp_tdata     (m_tlp_tdata),
-        .m_tlp_tvalid    (m_tlp_tvalid),
-        .m_tlp_tready    (m_tlp_tready)
-    );
-
-    // ------------------------------------------------------------------------
     // Internal register port (the former Wishbone B4 slave logic; driven by the AXI4-Lite front end)
     // ------------------------------------------------------------------------
     /* verilator lint_off UNUSEDSIGNAL */
     wire _unused_addr = |wb_adr_i[31:12];
     /* verilator lint_on UNUSEDSIGNAL */
-    wire wb_sel = wb_cyc_i && wb_stb_i;
-    wire [11:0] reg_offset = wb_adr_i[11:0] - BASE_ADDR[11:0];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -396,18 +336,7 @@ module asp_pio_tile #(
             sm_restart          <= 4'd0;
             sm_clkdiv_restart   <= 4'd0;
             wb_tx_wvalid        <= 4'd0;
-            wb_rx_ren           <= 4'd0;
             sm_exec_valid       <= 4'd0;
-            tlp_en              <= 1'b0;
-            out_mask            <= 4'd0;
-            tlp_tag             <= 8'd0;
-            tlp_channel         <= 8'd0;
-            burst_words         <= 4'd0;
-            trace_en            <= 1'b0;
-            out_timeout         <= 24'd0;
-            in_en               <= 1'b0;
-            in_channel          <= 8'd0;
-            sm_trigger_pulse    <= 1'b0;
 
             for (int s = 0; s < 4; s++) begin
                 sm_clkdiv[s]    <= {16'd1, 8'd0}; // Div = 1.0 (full speed)
@@ -423,9 +352,7 @@ module asp_pio_tile #(
             sm_restart       <= 4'd0;
             sm_clkdiv_restart<= 4'd0;
             wb_tx_wvalid     <= 4'd0;
-            wb_rx_ren        <= 4'd0;
             sm_exec_valid    <= 4'd0;
-            sm_trigger_pulse <= 1'b0;
 
             if (wb_sel && !wb_ack_o) begin
                 wb_ack_o <= 1'b1;
@@ -440,19 +367,6 @@ module asp_pio_tile #(
                         end
                         12'h004: begin // IRQ Clear
                             wb_irq_clr <= wb_dat_i[7:0];
-                        end
-                        12'h00C: begin // OUT_CFG ([SPEC-PIO-10])
-                            tlp_en      <= wb_dat_i[0];
-                            out_mask    <= wb_dat_i[7:4];
-                            tlp_tag     <= wb_dat_i[15:8];
-                            tlp_channel <= wb_dat_i[23:16];
-                            burst_words <= wb_dat_i[27:24];
-                            trace_en    <= wb_dat_i[31];
-                        end
-                        12'h090: out_timeout <= wb_dat_i[23:0];   // OUT_TIMEOUT
-                        12'h094: begin                             // IN_CFG
-                            in_en      <= wb_dat_i[0];
-                            in_channel <= wb_dat_i[15:8];
                         end
                         default: begin
                             // Instruction Memory (0x010 .. 0x08C)
@@ -478,9 +392,6 @@ module asp_pio_tile #(
                                     // SMx_INSTR: execute immediately ([SPEC-PIO-05])
                                     sm_exec_instr[s] <= wb_dat_i[15:0];
                                     sm_exec_valid[s] <= 1'b1;
-                                end else if (reg_offset == 12'(base_sm + 12'h1C)) begin
-                                    // Software Trigger Pulse
-                                    sm_trigger_pulse <= 1'b1;
                                 end
                             end
                         end
@@ -497,11 +408,6 @@ module asp_pio_tile #(
                                 24'd0
                             };
                         end
-                        12'h00C: wb_dat_o <= {trace_en, 3'd0, burst_words, tlp_channel, tlp_tag,
-                                              out_mask, 3'd0, tlp_en};          // OUT_CFG
-                        12'h090: wb_dat_o <= {8'd0, out_timeout};               // OUT_TIMEOUT
-                        12'h094: wb_dat_o <= {16'd0, in_channel, 7'd0, in_en};  // IN_CFG
-                        12'h098: wb_dat_o <= {23'd0, in_busy, 2'd0, in_queued}; // IN_STATUS
                         default: begin
                             // Instruction Memory Read
                             if (reg_offset >= 12'h010 && reg_offset <= 12'h08C) begin
@@ -528,8 +434,7 @@ module asp_pio_tile #(
                                         wb_dat_o <= sm_pinctrl[s];
                                     end else if (reg_offset == 12'(base_sm + 12'h14)) begin
                                         // RX FIFO Read
-                                        wb_dat_o     <= sm_rx_rdata[s];
-                                        wb_rx_ren[s] <= 1'b1;
+                                        wb_dat_o     <= sm_rx_rdata[s];   // popped now (wb_rx_ren)
                                     end else if (reg_offset == 12'(base_sm + 12'h18)) begin
                                         // Status
                                         wb_dat_o <= {25'd0, sm_active[s], sm_stalled[s], sm_pc[s]};

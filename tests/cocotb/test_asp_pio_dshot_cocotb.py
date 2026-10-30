@@ -61,10 +61,8 @@ async def setup(dut, hz):
     period_ps = 2 * round(1e12 / hz / 2)              # cocotb needs an even period
     cocotb.start_soon(Clock(dut.clk, period_ps, unit="ps").start())
     dut.rst_n.value = 0
-    dut.i_sys_timestamp.value = 0
     dut.i_gpio.value = 1 << PIN
     axil_setup(dut)
-    dut.m_tlp_tready.value = 1
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 2)

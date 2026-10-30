@@ -18,8 +18,6 @@ VERILOG_SOURCES = $(AXIS_DIR)/axis_fifo.v $(RTL_DIR)/trace/pio2_event_fifo.sv
 SIM_PARAMS ?= -GDEPTH=16
 else
 VERILOG_SOURCES = $(RTL_DIR)/asp_pio_sm.sv \
-                  $(RTL_DIR)/asp_pio_tlp_ingress.sv \
-                  $(RTL_DIR)/asp_pio_tlp_shim.sv \
                   $(RTL_DIR)/asp_pio_tile.sv
 endif
 

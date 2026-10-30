@@ -10,3 +10,4 @@ build/
 pio_tile_axil_*/
 pio_tile_axil/
 *.ini
+.claude/worktrees/

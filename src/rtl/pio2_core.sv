@@ -51,14 +51,13 @@ module pio2_core #(
     logic [3:0]  obs_stalled, obs_tx_empty, obs_rx_full;
     logic [7:0]  obs_irq;
     /* verilator lint_off UNUSEDSIGNAL */
-    logic [511:0] tlp_unused;
-    logic         tlp_valid_unused, tlp_ready_unused;
+    logic [3:0]   obs_active, tx_ready_unused, rx_valid_unused;
+    logic [127:0] rx_data_unused;
     logic [9:0]   level_unused;
     /* verilator lint_on UNUSEDSIGNAL */
 
     asp_pio_tile #(.BASE_ADDR(32'h0000_0000)) u_tile (
         .clk (clk), .rst_n (rst_n),
-        .i_sys_timestamp ({32'd0, timestamp}),
         .i_gpio (i_gpio), .o_gpio_out (o_gpio_out), .o_gpio_pindir (o_gpio_pindir),
         .s_axil_awaddr (s_axil_awaddr), .s_axil_awvalid (s_axil_awvalid), .s_axil_awready (s_axil_awready),
         .s_axil_wdata (s_axil_wdata), .s_axil_wstrb (s_axil_wstrb), .s_axil_wvalid (s_axil_wvalid),
@@ -66,11 +65,11 @@ module pio2_core #(
         .s_axil_bready (s_axil_bready), .s_axil_araddr (s_axil_araddr), .s_axil_arvalid (s_axil_arvalid),
         .s_axil_arready (s_axil_arready), .s_axil_rdata (s_axil_rdata), .s_axil_rresp (s_axil_rresp),
         .s_axil_rvalid (s_axil_rvalid), .s_axil_rready (s_axil_rready),
-        .s_tlp_tdata ('0), .s_tlp_tvalid (1'b0), .s_tlp_tready (tlp_ready_unused),
-        .m_tlp_tdata (tlp_unused), .m_tlp_tvalid (tlp_valid_unused), .m_tlp_tready (1'b1),
+        .s_axis_tx_tdata ('0), .s_axis_tx_tvalid (4'd0), .s_axis_tx_tready (tx_ready_unused),
+        .m_axis_rx_tdata (rx_data_unused), .m_axis_rx_tvalid (rx_valid_unused), .m_axis_rx_tready (4'd0),
         .o_pio_irq (o_irq),
         .o_obs_pc (obs_pc), .o_obs_stalled (obs_stalled), .o_obs_tx_empty (obs_tx_empty),
-        .o_obs_rx_full (obs_rx_full), .o_obs_irq (obs_irq)
+        .o_obs_rx_full (obs_rx_full), .o_obs_active (obs_active), .o_obs_irq (obs_irq)
     );
 
     logic [4:0]  ev_valid;

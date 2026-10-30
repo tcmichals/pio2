@@ -77,20 +77,18 @@ Top-level module: [`asp_pio_tile`](file:///src/rtl/asp_pio_tile.sv)
 | `m_tlp_tready` | `input` | `1 bit` | TLP router backpressure ready flag |
 | `o_pio_irq` | `output` | `1 bit` | Hardware tile interrupt request to host CPU (`irq[3:0]`) |
 
-## 4. Wishbone B4 Memory Map & Register Architecture
+## 4. Tile Register Map (AXI4-Lite)
 
-Base Address: `0x40000700` (Wishbone Pipelined Slave B4)
+Window `0x0000` of `pio2_core` (`[SPEC-AXI-03]`); AbstractX maps it at `0x40000700` through its own
+Wishbone to AXI4-Lite wrapper. Offsets `0x00C`, `0x090..0x098` and `0x11C + 0x20*N` are not used in pio2
+(AbstractX's wrapper serves its TLP registers there, `[SPEC-ICN-09]`).
 
 | Offset | Name | Access | Reset Value | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `0x000` | **`CTRL`** | `R/W` | `0x00000000` | State Machine Enable [3:0], Restart [7:4], Div Restart [11:8] |
 | `0x004` | **`IRQ`** | `R/W1C` | `0x00000000` | Internal 8-bit IRQ Bus Status & Clear (Bits 3:0 route to `o_pio_irq`) |
 | `0x008` | **`FSTAT`** | `RO` | `0x0F000000` | FIFO Status: RX Empty [31:28], TX Full [27:24] |
-| `0x00C` | **`OUT_CFG`** | `R/W` | `0x00000000` | TLP egress ([SPEC-PIO-10]): Enable [0], SM Mask [7:4], Tag [15:8], Channel [23:16], Burst Words [27:24] (0 = 10), Trace Enable [31] |
 | `0x010..0x08C` | **`IRAM[0..31]`** | `R/W` | `0x00000000` | Shared Instruction Memory (32 Words x 16-bit) for SM0..SM3 |
-| `0x090` | **`OUT_TIMEOUT`** | `R/W` | `0x00000000` | Egress idle timeout in clocks [23:0] (0 = off) |
-| `0x094` | **`IN_CFG`** | `R/W` | `0x00000000` | TLP ingress: Enable [0], Channel [15:8] |
-| `0x098` | **`IN_STATUS`** | `RO` | `0x00000000` | Queued ingress TLPs [5:0] (32 slots), Busy [8] |
 | `0x100 + 0x20*N` | **`SM[N]_CLKDIV`** | `R/W` | `0x00000000` | SM N Clock Divider (RP2040 layout): Int [31:16], Frac [15:8] (0 or 1.0 = full fabric clock) |
 | `0x104 + 0x20*N` | **`SM[N]_EXECCTRL`** | `R/W` | `0x0001F000` | Execution Control (RP2040 layout): Status N [3:0], Status Sel [4], Wrap Bottom [11:7], Wrap Top [16:12], JMP Pin [28:24], Side Pindir [29], Side En [30] |
 | `0x108 + 0x20*N` | **`SM[N]_SHIFTCTRL`** | `R/W` | `0x00000000` | Shift Control: Autopull [17], Autopush [16], In Dir [18], Out Dir [19], Push Thresh [24:20], Pull Thresh [29:25] |
@@ -144,7 +142,6 @@ make -f Makefile TESTCASE=test_asp_pio_cocotb
 * `test_sm_gpio_set_and_jmp`: Verifies JMP conditions (`!X`, `X--`), SET instructions, and delay cycles.
 * `test_tx_fifo_pull_and_out`: Verifies PULL/OUT dataflow and dynamic EXEC instruction injection.
 * `test_supervisor_worker_irq_chaining`: Verifies supervisor/worker synchronization via the internal IRQ bus.
-* `test_tlp_packetizer_and_trace_stream`: Verifies autonomous 64-byte TLP generation and Stream 5 timeline tracing.
 
 ## 8. SpecTrace Normative Requirements Matrix
 

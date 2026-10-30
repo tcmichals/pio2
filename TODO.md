@@ -32,8 +32,9 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
    2c. [x] AbstractX: `asp_pio_wrap` with ZipCPU `wbm2axilite` in front of the tile (AbstractX dded0fc)
    2d. [ ] `pio2_core` with the fixed boundary ([SPEC-ICN-11]): AXI4-Lite slave, AXI-Stream in / out with
       the channel in `TDEST`, IRQ; both host adapters attach to it
-   3. [ ] Tile: TLP adapters out (AbstractX wrapper with its WB->AXI4-Lite bridge), AXI-Stream FIFO
-      ports ([SPEC-ICN-09]); [x] observation port + `pio2_trace_tap` + `pio2_core` (tile, tap, event FIFO)
+   3. [x] Tile: TLP adapters out, AXI-Stream FIFO ports ([SPEC-ICN-09], 2026-10-30; stream suite with
+      register / stream collisions, one product bug fixed); [ ] AbstractX wrapper with the TLP adapters
+      (item 6); [x] observation port + `pio2_trace_tap` + `pio2_core` (tile, tap, event FIFO)
       ([SPEC-TRC-03]), shown in the debugger's Trace window
    4. [ ] SPI PHY single / dual, SCK-clocked + async FIFO ([SPEC-LINK-01]), framer with CRC32
       ([SPEC-LINK-02]), NIC registers ([SPEC-LINK-07])

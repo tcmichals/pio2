@@ -1,7 +1,8 @@
 # pio2 Interconnect: Host Link (SPI / Dual-SPI), Channels, AXI4-Lite, AXI-Stream, DMA, Trace
 
-Status: specification; implemented so far: the tile's AXI4-Lite port (`[SPEC-AXI-04]`) and the
-event FIFO (`[SPEC-TRC-01]`) (2026-10-29). Requirements carry tags; code that
+Status (2026-10-30): the tile's AXI4-Lite port (`[SPEC-AXI-04]`), the event FIFO (`[SPEC-TRC-01]`),
+the tile split (`[SPEC-ICN-09]`), the DMA engine and rings (`[SPEC-DMA-*]`), the crossbar and the core
+registers (`[SPEC-AXI-03]`) are built; the SPI link (`[SPEC-LINK-*]`) follows. Requirements carry tags; code that
 implements one carries `@impl [SPEC-xxx-nn] docs/INTERCONNECT_SPECIFICATION.md`.
 
 ## 1. Idea
@@ -100,11 +101,19 @@ AXI4-Lite crossbar, like every other block.
   | :--- | :--- |
   | `0x0000` | PIO tile registers (as today: CTRL, FSTAT, FDEBUG, IRQ, SMx_*, TXFx/RXFx, INSTR_MEM) |
   | `0x1000` | DMA engine registers (per channel) |
-  | `0x2000` | event FIFO / trace registers |
-  | `0x3000` | link registers (version, channel status, interrupt mask, error counters) |
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_axil_xbar_cocotb.py`: `DECERR`, slow slave
-  does not block others), `formal-check`
-* **Implementation Target**: `src/rtl/axi/pio2_axil_xbar.sv`
+  | `0x2000` | event FIFO / trace registers (`[SPEC-TRC-02]`) |
+  | `0x3000` | core registers: `ID`, `VERSION`, `ISR`, `IMR`, per-channel status (`[SPEC-ICN-11]`) |
+  | `0x3100` | link registers (`[SPEC-LINK-07]`): served by the SPI adapter itself, never reach the core |
+
+* **Requirement (2026-10-30)**: the crossbar is Forencich `axil_crossbar` (`[SPEC-AXI-05]`) with three
+  slaves: the tile (`0x0000`, 4 KB), the DMA engine (`0x1000`, 4 KB) and the core registers (`0x2000`,
+  8 KB: trace window and core window). Each of our slaves uses one AXI4-Lite front end,
+  `pio2_axil_regs`, that takes one write and one read per clock and answers whole-word writes only
+  (`WSTRB` other than `4'hF`: no effect, `SLVERR`, as the tile); an offset with no register reads 0.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_core_cocotb.py`: every window reached,
+  `DECERR` above `0x4000`, back-to-back transactions), `formal-check` (`tests/formal/pio2_axil_regs.sby`:
+  ZipCPU `faxil_slave` on the front end)
+* **Implementation Target**: `src/rtl/pio2_core.sv`, `src/rtl/axi/pio2_axil_regs.sv`
 
 ### `[SPEC-AXI-05]` Reuse Proven AXI Building Blocks
 * **Requirement**: generic AXI blocks are reused, not rewritten, from:
@@ -199,7 +208,11 @@ AXI4-Lite crossbar, like every other block.
 
 ### `[SPEC-LINK-07]` NIC-Style Register Model
 * **Requirement**: the link block is controlled like a small NIC, through registers in the link
-  window (`0x3000`) that both the host (as `REG_*` frames) and the simulator can read:
+  window (`0x3100`, served inside the SPI adapter, 2026-10-30; `ID`, `VERSION` and the core's `ISR` /
+  `IMR` are at `0x3000`, `[SPEC-ICN-11]`) that both the host (as `REG_*` frames) and the simulator can
+  read. The link's own `ISR` uses bits 0 (RX frame ready), 1 (TX queue space), 5 (CRC error) and 6
+  (overflow); bit 2 there mirrors the core's interrupt, so the `ISR` byte at the start of every window
+  shows all pending causes in one place:
 
   | Register | Meaning |
   | :--- | :--- |
@@ -250,7 +263,8 @@ AXI4-Lite crossbar, like every other block.
 * **Implementation Target**: `src/rtl/link/pio2_link_mux.sv`, `src/pio2/host/driver.py`
 
 ### `[SPEC-LINK-05]` Interrupt Pin and Status
-* **Requirement**: `INT_n` (active low, level) = any bit of (`ISR` and `IMR`) (`[SPEC-LINK-07]`):
+* **Requirement**: `INT_n` (active low, level) = the core's interrupt or any bit of the link's (`ISR`
+  and `IMR`) (`[SPEC-LINK-07]`, `[SPEC-ICN-11]`):
   a reply frame queued, an out stream at or above `STREAM_THR`, an in stream with at least
   `STREAM_THR` free, a DMA channel done or in error, a link error, trace dropped. The host reads `ISR`
   (in the first byte of any window, or with `STATUS`), services the causes, and writes 1 to clear
@@ -269,29 +283,74 @@ AXI4-Lite crossbar, like every other block.
 
 ### `[SPEC-DMA-01]` Channels Paced by the PIO FIFOs
 * **Requirement**: eight PIO channels plus one trace channel. Each PIO channel moves 32-bit words
-  between a ring buffer in RAM and one PIO FIFO (TX of SM n, or RX of SM n); the trace channel moves
-  event records from the event FIFO into ring 1 (`[SPEC-TRC-02]`). Every channel is paced by that FIFO's data request (TX not full / RX not empty),
-  as RP2040 DMA is paced by DREQ; both sides are AXI-Stream (`[SPEC-AXI-02]`), so the FIFO's handshake
-  is the pacing.
-* **Requirement (modes)**: `ONE_SHOT` (N words, then done), `RING` (continuous; ring wraps),
-  `TRIGGERED` (each trigger moves one block of N words; trigger = a PIO IRQ flag or an input pin, e.g.
-  IMU DRDY), `DIRECT` (no ring: the link stream feeds or drains the FIFO directly, back-pressured by
-  `TREADY`; low latency, low rate).
-* **Requirement (counters)**: per channel: words moved, underruns (TX FIFO wanted data, ring empty),
-  overruns (RX FIFO had data, ring full), each counted and each producing a trace event. Channels share
-  the ring RAM by round robin, at most `MAX_BURST` (default 16) words per turn.
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_dma_cocotb.py`: each mode, DREQ pacing, underrun/overrun counted, 1000-block steady state)
-* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`
+  between its ring and one PIO FIFO (TX of SM n, or RX of SM n); the trace channel moves event
+  records from the event FIFO into ring 1 (`[SPEC-TRC-02]`). Every channel is paced by that FIFO's
+  data request (TX not full / RX not empty), as RP2040 DMA is paced by DREQ; both sides are
+  AXI-Stream (`[SPEC-AXI-02]`), so the FIFO's handshake is the pacing.
+* **Requirement (numbering)**: a channel has the number of its link channel (`[SPEC-LINK-03]`): channel
+  1 is the trace, channels 2..9 are the PIO channels. Each PIO channel has a direction: `OUT` (PIO RX
+  FIFO -> ring -> host) or `IN` (host -> ring -> PIO TX FIFO).
+* **Requirement (modes)**: `ONE_SHOT` (N words after a start, then done), `RING` (continuous),
+  `TRIGGERED` (each trigger allows one more block of N words; trigger = rising edge of a PIO IRQ flag or
+  of an input pin, e.g. IMU DRDY, or a software trigger), `DIRECT` (no ring: the link stream feeds the
+  TX FIFO, or the RX FIFO feeds the link one word per block, back-pressured by `TREADY`; low latency,
+  low rate). Mode, direction, SM, N and the trigger are registers; a channel acts only while enabled.
+  When two enabled channels name the same FIFO, the lower-numbered one owns it. Register access to the
+  FIFOs (TXFx / RXFx) keeps working; in a clock where the register port writes TXFx or reads RXFx the
+  tile holds off the stream (`[SPEC-ICN-09]`), so no word is lost or duplicated.
+* **Requirement (counters and events)**: per channel: words moved (wraps), triggers, underruns and
+  overruns (saturating, cleared by a write). An *underrun* starts when an active `IN` channel's SM has
+  drained its TX FIFO (TX FIFO empty) while the ring is empty, after the channel moved at least one word
+  since it was started; an *overrun* starts when an `OUT` channel's RX FIFO holds a word while the ring
+  is full. Each start of one is counted once and gives a trace event (`[SPEC-TRC-01]` `0x0A` / `0x0B`,
+  `src` = channel, `data` = count); a trigger gives `0x0C` (`data` = trigger count); a `ONE_SHOT` or
+  `TRIGGERED` block gives `0x08` at its first word and `0x09` when complete (`data` = N). Each channel
+  is one event producer; events of one channel in the same clock are offered one per clock in the order
+  trigger, begin, done, underrun, overrun, and a repeat of a pending one is merged and counted.
+* **Requirement (registers, window `0x1000`, block per channel at `0x1000 + 0x40 * chan`, chan 1..9)**:
+
+  | Offset | Register | Fields |
+  | :--- | :--- | :--- |
+  | `0x00` | `CFG` | `EN[0]`, `DIR[1]` (0 `OUT`, 1 `IN`), `MODE[3:2]` (0 `ONE_SHOT`, 1 `RING`, 2 `TRIGGERED`, 3 `DIRECT`), `SM[5:4]`, `TRIG_PIN[6]` (0: IRQ flag, 1: input pin), `TRIG_IDX[12:8]` |
+  | `0x04` | `COUNT` | N, words per block `[15:0]` (0 = 65536) |
+  | `0x08` | `LEVEL` | words in the ring `[15:0]`, free words `[31:16]` (read only) |
+  | `0x0C` | `STATUS` | `DONE[0]` (W1C), `BUSY[1]`, `REMAINING[31:16]` |
+  | `0x10` | `MOVED` | words moved (read; write clears) |
+  | `0x14` | `UNDERRUNS` | saturating (write clears) |
+  | `0x18` | `OVERRUNS` | saturating (write clears) |
+  | `0x1C` | `TRIGGERS` | saturating (write clears) |
+  | `0x20` | `FLUSH` | `OUT` / trace: clocks a partial frame may wait before it is offered `[23:0]` (0 = whole frames only) |
+  | `0x24` | `THR` | stream threshold in words `[15:0]` for `[SPEC-LINK-05]` (0 = off) |
+  | `0x28` | `CTRL` | write 1: `RESET_RING[0]`, `START[1]` (`ONE_SHOT`: N more words), `SW_TRIGGER[2]` |
+
+  `0x1000` itself is `DMA_CAPS` (read): ring words per channel `[15:0]`, frame words `[23:16]`. For
+  channel 1 only `EN`, `LEVEL`, `MOVED`, `FLUSH`, `THR` and `CTRL.RESET_RING` apply (it is always a
+  `RING` `OUT` channel fed by the event FIFO). `ONE_SHOT` starts when `EN` goes to 1 or on `START`.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_dma_cocotb.py`: each mode, DREQ pacing,
+  underrun / overrun counted once per start, register FIFO access mixed with DMA, 1000-block steady
+  state)
+* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`, `src/rtl/dma/pio2_dma_chan.sv`
 
 ### `[SPEC-DMA-02]` Rings Connect DMA and Link Streams
-* **Requirement**: each stream channel's ring is one producer / one consumer (link side and DMA side),
-  with read/write indices in registers; its levels feed the link credits (`[SPEC-LINK-04]`) and the
-  interrupt thresholds (`[SPEC-LINK-05]`).
+* **Requirement**: each channel's ring is one producer / one consumer (link side and DMA side). A
+  ring is its own block-RAM FIFO (Forencich `axis_fifo`, `RING_WORDS` deep, default 256, a build
+  parameter), so channels never wait for each other on a shared RAM; its level and free count (an
+  exact occupancy counter at the ring's two ports) are registers and feed the link credits
+  (`[SPEC-LINK-04]`) and the interrupt thresholds (`[SPEC-LINK-05]`).
+* **Requirement (out to the host)**: an `OUT` ring (and ring 1) offers one block to the core's output
+  stream (`[SPEC-ICN-11]`) when it holds `FRAME_WORDS` words (default 28, one link frame,
+  `[SPEC-LINK-02]`), or when it holds fewer and the oldest has waited `FLUSH` clocks; the block has
+  `TLAST` on its last word and `TDEST` = channel. Blocks of all out rings are merged whole, round robin.
+* **Requirement (in from the host)**: the core's input stream is split by `TDEST` to the `IN` rings
+  (`DIRECT`: to the TX FIFO). A word for a channel that is not an enabled `IN` channel is dropped and
+  counted (`IN_DROPPED`, `[SPEC-ICN-11]`). A full ring back-pressures the input stream; the SPI adapter
+  checks the credit before it forwards a frame, so this never blocks another channel.
 * **Requirement (examples it must carry)**: DShot / bidirectional DShot frames out on a RING channel;
-  ESC serial bytes in both directions; IMU auto-DMA: DRDY triggers a PIO SPI burst, a TRIGGERED RX
+  ESC serial bytes in both directions; IMU auto-DMA: DRDY triggers a PIO SPI burst, a TRIGGERED OUT
   channel moves each sample block into a ring, the host collects batches on interrupt.
-* **Verified by**: `cocotb-regression` (DShot ring out, ESC serial both ways, IMU triggered burst in, end to end)
-* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`, `src/rtl/dma/pio2_ring_ram.sv`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_core_cocotb.py`: DShot ring in, ESC
+  serial both ways, IMU triggered burst out, end to end through the core's streams)
+* **Implementation Target**: `src/rtl/dma/pio2_dma.sv`, `src/rtl/dma/pio2_ring.sv`
 
 ## 5. Trace (barectf)
 
@@ -305,7 +364,10 @@ AXI4-Lite crossbar, like every other block.
   event) is written in a clock when no slot is waiting (lowest priority), so reporting losses never
   causes more of them; the saturating 32-bit total stays exact. Records leave in priority order, not
   strictly in time order; each carries its own timestamp and the host orders them (`[SPEC-TRC-02]`).
-  Type codes above `0x1F` are ignored (not recorded, not counted).
+  Type codes above `0x1F` are ignored (not recorded, not counted). In `pio2_core` (2026-10-30) the
+  producers are the eight DMA channels (0..7, highest) and then the trace tap's five (8..12); the link
+  is outside the core (`[SPEC-ICN-11]`) and counts its frame errors in its own registers
+  (`[SPEC-LINK-07]`), so type `0x10` is reserved.
 * **Requirement (record, 64 bits)**: `[15:0] data` (PC, word count, IRQ number, drop count, ...),
   `[23:16] src` (SM or DMA channel), `[31:24] type`, `[63:32] timestamp` (system clocks, wraps; the host
   extends it to 64 bits). On the link a record is two 32-bit words, bits `[31:0]` first.
@@ -353,7 +415,7 @@ AXI4-Lite crossbar, like every other block.
   counted too (`[SPEC-TRC-01]`).
 * **Requirement**: `pio2_core` contains the tile, the tap and the event FIFO; until the DMA engine exists
   the record stream is a port of the core, and the debugger reads it directly.
-* **Verified by**: `host-tests` (`tests/test_trace.py`: blink's stall on `pull`, IRQ set / clear,
+* **Verified by**: `host-tests` (`tests/test_trace.py`: blink's stall on pull, IRQ set / clear,
   FIFO edges, timestamps against the per-clock trace)
 * **Implementation Target**: `src/rtl/trace/pio2_trace_tap.sv`, `src/rtl/pio2_core.sv`, `src/rtl/asp_pio_tile.sv`
 
@@ -374,6 +436,12 @@ AXI4-Lite crossbar, like every other block.
 * **Verified by**: `host-tests` (records -> CTF, read back with babeltrace2)
 * **Requirement (order)**: the host sorts records by their extended timestamp before writing CTF
   packets, because the event FIFO emits them in priority order (`[SPEC-TRC-01]`).
+* **Requirement (registers, window `0x2000`, 2026-10-30)**: `0x2000 TRACE_MASK` (type mask,
+  `[SPEC-TRC-01]`; reset 0 = tracing off, so a board does not stream trace frames nobody asked for),
+  `0x2004 TRACE_LEVEL` (records in the event FIFO), `0x2008 TRACE_DROPPED` (saturating total; write
+  clears), `0x200C TRACE_MERGED` (trace tap merges; write clears), `0x2010 TIMESTAMP` (the record
+  clock, read). The record stream reaches ring 1 through a Forencich `axis_adapter` (64 -> 32 bits,
+  bits `[31:0]` first); ring 1 is DMA channel 1 (`[SPEC-DMA-01]`).
 * **Implementation Target**: `src/rtl/dma/pio2_dma.sv` (trace channel), `src/pio2/trace/ctf.py`, `src/pio2/trace/barectf_config.yaml`
 
 ## 6. Integration and tests
@@ -385,8 +453,20 @@ AXI4-Lite crossbar, like every other block.
   per state machine, an AXI-Stream TX input and RX output on its FIFOs (`[SPEC-AXI-02]` pacing) and an
   event output for `[SPEC-TRC-01]`. Register access to the FIFOs stays (TXFx / RXFx) for software that
   does not use DMA.
-* **Verified by**: `cocotb-regression` (tile tests through the AXI-Stream FIFO ports; AbstractX wrapper
-  passes AbstractX's TLP-path test)
+* **Requirement (ports, 2026-10-30)**: per SM n, `s_axis_tx_*[n]` (32-bit `TDATA`, `TVALID`, `TREADY` =
+  TX FIFO not full) and `m_axis_rx_*[n]` (`TVALID` = RX FIFO not empty, `TDATA` = its head). In a clock
+  where the register port writes TXFn the TX `TREADY` is low, and in a clock where it reads RXFn the RX
+  `TVALID` is low, so register and stream access never take or lose the same word. The observation
+  port (`[SPEC-TRC-03]`) gains `o_obs_active` (per SM: executing, not stalled on a clock divider).
+* **Requirement (what leaves the tile)**: the TLP ingress queue and egress packetizer
+  (`asp_pio_tlp_ingress`, `asp_pio_tlp_shim`), their registers (`OUT_CFG 0x0C`, `OUT_TIMEOUT 0x90`,
+  `IN_CFG 0x94`, `IN_STATUS 0x98`), the software trigger `SMx + 0x1C` and the tile's timestamp input
+  move to AbstractX (`rtl/pio_tlp/`), which serves those offsets in its wrapper before the AXI4-Lite
+  bridge and builds TLPs from the stream ports (formerly SPEC-PIO-04 and SPEC-PIO-10, now in
+  AbstractX's specification). In pio2 those offsets read 0 and writes do nothing.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_stream_cocotb.py`: TX and RX through
+  the stream ports with random back-pressure, mixed with TXF / RXF register access, every word exactly
+  once; all other tile suites unchanged), AbstractX (its `asp_pio_wrap` TLP-path test)
 * **Implementation Target**: `src/rtl/asp_pio_tile.sv`
 
 ### `[SPEC-ICN-11]` Host Adapters: SPI Link for Tang, Native AXI for Zynq
@@ -410,6 +490,21 @@ AXI4-Lite crossbar, like every other block.
   3. one AXI-Stream output, 32-bit, channel number in `TDEST` (1..9), whole `TLAST` blocks merged
      inside the core by Forencich `axis_arb_mux` (trace ring and out rings, round robin);
   4. one interrupt (any `ISR` and `IMR`).
+* **Requirement (core registers, window `0x3000`, 2026-10-30)**:
+
+  | Offset | Register | Meaning |
+  | :--- | :--- | :--- |
+  | `0x3000` | `ID` | `0x50494F32` ("PIO2") |
+  | `0x3004` | `VERSION` | protocol version `0x0001_0000` (major `[31:16]`, minor `[15:0]`) |
+  | `0x3008` | `ISR` | W1C: `STREAM[2]` (a channel at its threshold), `DMA_DONE[3]`, `DMA_ERR[4]` (underrun / overrun), `TRACE_DROPPED[7]`, `PIO_IRQ[8]` (tile IRQ flags 0..3); bits 0, 1, 5, 6 are the link's (`[SPEC-LINK-07]`) and read 0 here |
+  | `0x300C` | `IMR` | interrupt mask; the core's interrupt = any (`ISR` and `IMR`) |
+  | `0x3010` | `STREAM_PEND` | bit c: enabled channel c with `THR` != 0 and (`OUT`: level >= `THR`; `IN`: free >= `THR`) (read) |
+  | `0x3014` | `DMA_DONE` | bit c: channel c finished a block (W1C) |
+  | `0x3018` | `DMA_ERR` | bit c: channel c had an underrun or overrun (W1C) |
+  | `0x301C` | `IN_DROPPED` | input-stream words for no enabled `IN` channel (saturating; write clears) |
+
+  A cause that is still true sets its `ISR` bit again in the next clock, so a W1C never loses an
+  interrupt (`[SPEC-LINK-05]`).
 * **Requirement (SPI adapter)**: PHY, framers, CRC32, an AXI4-Lite master for channel 0, and the
   frame / block conversion (channel in the frame header <-> `TDEST`); it puts channel-0 replies first
   (`[SPEC-LINK-08]`) and drives `INT_n` from the interrupt.
@@ -419,7 +514,8 @@ AXI4-Lite crossbar, like every other block.
   `IRQ_F2P`.
 * **Requirement**: the host driver (`[SPEC-LINK-06]`) has an SPI back end and a Zynq back end (UIO mmap
   for the registers, a DMA buffer for the streams) with the same channel API.
-* **Verified by**: `cocotb-regression` (the core through its boundary with each adapter's traffic pattern), `board-bringup`
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_core_cocotb.py`: the core through its
+  boundary, registers in every window, streams by `TDEST`, interrupt), `board-bringup`
   (Zynq: registers and one stream through the PS)
 * **Implementation Target**: `src/rtl/pio2_core.sv`, `src/pio2/host/zynq.py`
 

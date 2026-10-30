@@ -17,8 +17,7 @@ SIM = Path(__file__).resolve().parent / "sim"
 OUT = ROOT / "build" / "sim"
 LIB = OUT / "libpio2sim.so"
 SOURCES = [ROOT / "third_party" / "verilog-axis" / "rtl" / "axis_fifo.v",
-           RTL / "asp_pio_sm.sv", RTL / "asp_pio_tlp_ingress.sv", RTL / "asp_pio_tlp_shim.sv",
-           RTL / "asp_pio_tile.sv", RTL / "trace" / "pio2_event_fifo.sv",
+           RTL / "asp_pio_sm.sv", RTL / "asp_pio_tile.sv", RTL / "trace" / "pio2_event_fifo.sv",
            RTL / "trace" / "pio2_trace_tap.sv", RTL / "pio2_core.sv"]
 
 
@@ -37,6 +36,10 @@ def stale():
 def build(force=False, quiet=True):
     if not force and not stale():
         return LIB
+    # Fresh object directory on every rebuild: Verilator's make dependencies hold absolute paths, so an
+    # obj/ left from a checkout at another path names sources that no longer exist (engineering log,
+    # 2026-10-30).
+    shutil.rmtree(OUT / "obj", ignore_errors=True)
     OUT.mkdir(parents=True, exist_ok=True)
     cmd = [verilator(), "--cc", "--exe", "--build", "--vpi", "-O2", "-j", str(os.cpu_count() or 2),
            "--top-module", "pio2_core", "-Wno-fatal", "-Mdir", str(OUT / "obj"), "-o", str(LIB),

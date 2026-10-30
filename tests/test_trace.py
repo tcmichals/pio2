@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Tim Michals
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""PIO trace records from the RTL ([SPEC-TRC-03], [SPEC-TRC-01]) checked against the per-clock trace."""
+"""PIO trace records from the RTL ([SPEC-TRC-03], [SPEC-TRC-01]): made by pio2_trace_tap inside pio2_core
+(simulated by Session), checked against the per-clock trace."""
 # @verifies [SPEC-TRC-03] docs/INTERCONNECT_SPECIFICATION.md
 
 import pytest

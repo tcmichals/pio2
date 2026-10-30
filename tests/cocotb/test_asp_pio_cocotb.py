@@ -1,17 +1,15 @@
 # Copyright (C) 2026 Tim Michals
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Comprehensive Cocotb regression suite for AbstractX PIO Tile Subsystem.
+"""Cocotb regression suite for the pio2 PIO tile.
 
 Verifies:
-- [SPEC-PIO-01]: Quad-State Machine Tile Architecture (SM0..SM3, clock dividers).
-- [SPEC-PIO-02]: Standard RP2040 16-Bit Instruction Set Compatibility (SET, MOV, IN, OUT, PUSH, PULL, JMP, WAIT, IRQ).
-- [SPEC-PIO-03]: Internal IRQ Bus & Supervisor/Worker State Machine Chaining.
-- [SPEC-PIO-04]: Integrated 64-Byte TLP Framing & Nanosecond Timestamping.
-- [SPEC-PIO-05]: Wishbone B4 Slave Bus Interface & Register Map (0x40000700).
-- [SPEC-PIO-06]: Multi-Rate Primary-Paced IMU Auto-DMA Sequence.
-- [SPEC-PIO-07]: barectf CTF 1.8 Hardware Observability & Timeline Integration.
+- [SPEC-PIO-01]: four state machines, clock dividers.
+- [SPEC-PIO-02]: RP2040 16-bit instruction set (SET, MOV, IN, OUT, PUSH, PULL, JMP, WAIT, IRQ).
+- [SPEC-PIO-03]: internal IRQ bus and supervisor / worker chaining.
+- [SPEC-PIO-05]: register map through the AXI4-Lite port.
+(The TLP packetizer test moved to AbstractX with the TLP path, [SPEC-ICN-09].)
 """
-# @impl [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-04] [SPEC-PIO-05] [SPEC-PIO-06] [SPEC-PIO-07] tests/cocotb/test_asp_pio_cocotb.py
+# @verifies [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-05] docs/SPECIFICATION.md
 
 import cocotb
 from cocotb.clock import Clock
@@ -24,7 +22,6 @@ PIO_BASE = 0x40000700
 REG_CTRL = 0x00
 REG_IRQ = 0x04
 REG_FIFO_STAT = 0x08
-REG_TLP_CFG = 0x0C
 IRAM_BASE = 0x10
 
 # State Machine Register Offsets (Base = 0x100 + 0x20 * N)
@@ -102,12 +99,11 @@ async def init_tile(dut):
     """Reset the PIO tile and set defaults."""
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())  # 100 MHz clock
     dut.rst_n.value = 0
-    dut.i_sys_timestamp.value = 0
     dut.i_gpio.value = 0
     axil_setup(dut)
-    dut.m_tlp_tready.value = 1
-    dut.s_tlp_tvalid.value = 0
-    dut.s_tlp_tdata.value = 0
+    dut.s_axis_tx_tvalid.value = 0
+    dut.s_axis_tx_tdata.value = 0
+    dut.m_axis_rx_tready.value = 0
 
     await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
@@ -317,121 +313,4 @@ async def test_supervisor_worker_irq_chaining(dut):
     assert rounds >= 5, f"supervisor completed only {rounds} rounds in 200 clocks"
 
     # Disable both
-    await reg_write(dut, REG_CTRL, 0x00)
-
-
-@cocotb.test()
-async def test_tlp_packetizer_and_trace_stream(dut):
-    """[SPEC-PIO-04] [SPEC-PIO-07] Verify autonomous 64-Byte TLP datagram and Timeline trace generation."""
-    await init_tile(dut)
-
-    # 1. OUT_CFG ([SPEC-PIO-10]): EN[0], MASK[7:4] = SM1, TAG[15:8] = 5, CHANNEL[23:16] = 2,
-    #    BURST_WORDS[27:24] = 4, TRACE_EN[31]
-    tlp_cfg_word = 1 | (0x2 << 4) | (5 << 8) | (2 << 16) | (4 << 24) | (1 << 31)
-    await reg_write(dut, REG_TLP_CFG, tlp_cfg_word)
-
-    # Verify readback
-    cfg_rb = await reg_read(dut, REG_TLP_CFG)
-    assert (cfg_rb & 1) == 1, "TLP not enabled in config"
-
-    # Set mock system timestamp
-    dut.i_sys_timestamp.value = 0x0000000A12345678
-
-    # 2. Write 4 words into SM1 RX FIFO via internal shift/push or program:
-    # Program SM1:
-    #   0: SET X, 0x11
-    #   1: MOV ISR, X
-    #   2: PUSH BLOCK
-    #   3: SET X, 0x12
-    #   4: MOV ISR, X
-    #   5: PUSH BLOCK
-    #   6: SET X, 0x13
-    #   7: MOV ISR, X
-    #   8: PUSH BLOCK
-    #   9: SET X, 0x14
-    #  10: MOV ISR, X
-    #  11: PUSH BLOCK
-    #  12: JMP 12  ; Halt/idle
-    prog_tlp = [
-        PIO_SET(dest=1, data=0x11),  # 1 = X
-        PIO_MOV(dest=6, op=0, src=1),# dest 6 = ISR, src 1 = X
-        PIO_PUSH(iffull=0, block=1),
-        PIO_SET(dest=1, data=0x12),
-        PIO_MOV(dest=6, op=0, src=1),
-        PIO_PUSH(iffull=0, block=1),
-        PIO_SET(dest=1, data=0x13),
-        PIO_MOV(dest=6, op=0, src=1),
-        PIO_PUSH(iffull=0, block=1),
-        PIO_SET(dest=1, data=0x14),
-        PIO_MOV(dest=6, op=0, src=1),
-        PIO_PUSH(iffull=0, block=1),
-        PIO_JMP(cond=0, addr=12)
-    ]
-    for i, inst in enumerate(prog_tlp):
-        await reg_write(dut, IRAM_BASE + i * 4, inst)
-
-    await reg_write(dut, SM_EXECCTRL(1), (12 << 12) | (0 << 7))
-    await reg_write(dut, SM_CLKDIV(1), (1 << 16))
-
-    # Monitor AXI-Stream m_tlp_tdata for the emitted 64-byte TLPs from before the SM starts: the
-    # packets come within a few clocks of the trigger, and a register write returns only after its
-    # response (AXI4-Lite takes a few clocks longer than the old Wishbone helper did).
-    tlp_packets = []
-    trace_packets = []
-
-    async def collect(n):
-        for _ in range(n):
-            await RisingEdge(dut.clk)
-            if int(dut.m_tlp_tvalid.value) == 1 and int(dut.m_tlp_tready.value) == 1:
-                raw_bytes = int(dut.m_tlp_tdata.value).to_bytes(64, byteorder="big")
-                if raw_bytes[0] == 0x10:
-                    tlp_packets.append(raw_bytes)
-                elif raw_bytes[0] == 0xC1:
-                    trace_packets.append(raw_bytes)
-
-    collector = cocotb.start_soon(collect(120))
-    # Enable SM1
-    await reg_write(dut, REG_CTRL, 0x02 | (0x02 << 4))  # Enable SM1 & restart
-    await reg_write(dut, REG_CTRL, 0x02)
-    # Pulse software trigger to generate Stream 5 timeline span
-    await reg_write(dut, SM_TRIG(1), 1)
-    await collector
-
-    assert len(tlp_packets) > 0, "No 64-byte TLP datagram was emitted by the TLP shim!"
-    pkt = tlp_packets[0]
-
-    # Verify TLP Header: DW0 = [0x10, Flags, Tag, Channel]
-    assert pkt[0] == 0x10, f"Expected Type 0x10, got 0x{pkt[0]:02X}"
-    assert pkt[2] == 5, f"Expected Tag 5, got {pkt[2]}"
-    assert pkt[3] == 2, f"Expected Channel 2, got {pkt[3]}"
-    assert pkt[1] == 0x02, f"Expected flags = SM mask 0x02, got 0x{pkt[1]:02X}"
-    assert int.from_bytes(pkt[8:10], "big") == 4, "length_dw"
-
-    # Verify timestamp latched (bytes 12..19 in big-endian)
-    ts_latched = int.from_bytes(pkt[12:20], byteorder="big")
-    assert ts_latched == 0x0000000A12345678, f"Timestamp mismatch: 0x{ts_latched:016X}"
-
-    # Verify Payload Words (bytes 20..35)
-    w0 = int.from_bytes(pkt[20:24], byteorder="big")
-    w1 = int.from_bytes(pkt[24:28], byteorder="big")
-    w2 = int.from_bytes(pkt[28:32], byteorder="big")
-    w3 = int.from_bytes(pkt[32:36], byteorder="big")
-    assert w0 == 0x11, f"Word 0 expected 0x11, got 0x{w0:X}"
-    assert w1 == 0x12, f"Word 1 expected 0x12, got 0x{w1:X}"
-    assert w2 == 0x13, f"Word 2 expected 0x13, got 0x{w2:X}"
-    assert w3 == 0x14, f"Word 3 expected 0x14, got 0x{w3:X}"
-
-    # Check that CTF 1.8 timeline trace packet was also emitted
-    assert len(trace_packets) > 0, "No barectf Stream 5 trace packet emitted!"
-    trace_pkt = trace_packets[0]
-    assert trace_pkt[0] == 0xC1 and trace_pkt[1] == 0xFC, f"Invalid trace magic: {trace_pkt[0]:02X} {trace_pkt[1]:02X}"
-
-    # Test AXI-Stream backpressure
-    dut.m_tlp_tready.value = 0
-    await ClockCycles(dut.clk, 4)
-    # Re-enable ready
-    dut.m_tlp_tready.value = 1
-    await ClockCycles(dut.clk, 2)
-
-    # Disable SM1
     await reg_write(dut, REG_CTRL, 0x00)

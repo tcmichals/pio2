@@ -74,7 +74,8 @@ flowchart TD
   divider, pin mapping, shift control), loaded by the host at run time over CONTROL TLPs. Choosing
   another protocol or rate needs no new bitstream.
 * **Requirement**: RTL provides only generic resources: PIO tiles ([SPEC-PIO-01]), generic
-  bidirectional pins ([SPEC-PIO-09]), a generic per-tile TLP data path ([SPEC-PIO-10]) and program
+  bidirectional pins ([SPEC-PIO-09]), generic AXI-Stream FIFO ports and DMA channels
+  (`[SPEC-ICN-09]`, `[SPEC-DMA-01]` in `INTERCONNECT_SPECIFICATION.md`) and program
   loading ([SPEC-PIO-11]). No module may encode a protocol (bit timing, framing, command words,
   telemetry decode). Protocol knowledge lives in `src/programs/*.pio` and host software.
 * **Requirement (migration)**: the dedicated cores `asp_dshot_core`, `asp_uart_core`,
@@ -140,17 +141,6 @@ flowchart TD
 * **Implementation Target**: `src/rtl/asp_pio_tile.sv`, `src/rtl/asp_pio_sm.sv`
 * **Verified by**: `cocotb-regression`
 
-### `[SPEC-PIO-04]` Integrated 64-Byte TLP Framing & Nanosecond Timestamping
-* **Requirement**: The PIO tile MUST integrate an autonomous TLP packetizer shim. When a designated state machine pushes a completed sensor burst (e.g. 14 bytes) into its RX FIFO:
-  1. The shim latches the 64-bit monotonic system timestamp (`i_sys_timestamp`) sampled at the exact cycle of the triggering event.
-  2. The shim frames the payload into a standard 64-byte `Tlp64` datagram (`Type=0x10`, Target Address, Sequence ID, Timestamp, Sensor Payload).
-  3. The shim drives `m_tlp_tdata[511:0]` and `m_tlp_tvalid` into `asp_router.sv` via AXI-Stream with zero CPU intervention.
-* **Update (2026-10-27)**: the "designated state machine" is now the `OUT_CFG` SM mask and the
-  timestamp is the clock the first word leaves the RX FIFOs; framing, mask and send rules are in
-  [SPEC-PIO-10]. The old per-tile trigger timestamp (`SMx` offset `0x1C`) only starts a trace event.
-* **Implementation Target**: `src/rtl/asp_pio_tlp_shim.sv`, `src/rtl/asp_pio_tile.sv`
-* **Verified by**: `cocotb-regression`
-
 ### `[SPEC-PIO-05]` Register Map (Bus: AXI4-Lite, [SPEC-AXI-04])
 * **Bus (2026-10-29)**: this register map moves unchanged from the Wishbone port to an AXI4-Lite slave
   port (`[SPEC-AXI-04]` in `docs/INTERCONNECT_SPECIFICATION.md`); pio2 has no Wishbone. Until that
@@ -159,8 +149,8 @@ flowchart TD
   * `0x00`: Tile Control & Status (`ENABLE[3:0]`, `RESTART[3:0]`).
   * `0x04`: Internal IRQ Status & Clear.
   * `0x08`: FIFO status (read): RX empty `[31:28]`, TX full `[27:24]`.
-  * `0x0C`, `0x90`, `0x94`, `0x98`: TLP data path `OUT_CFG`, `OUT_TIMEOUT`, `IN_CFG`, `IN_STATUS`
-    ([SPEC-PIO-10]).
+  * `0x0C`, `0x90`, `0x94`, `0x98`, `0x11C + 0x20 * N`: not used in pio2 (read 0); AbstractX's
+    wrapper serves its TLP registers at these offsets (`[SPEC-ICN-09]`).
   * `0x10 .. 0x8C`: Instruction Memory (32 words x 32-bit, lower 16 bits active).
   * `0x100 + 0x20 * N`: SM `N` Clock Divider, RP2040 `CLKDIV` layout (`INT[31:16]`, `FRAC[15:8]`).
   * `0x104 + 0x20 * N`: SM `N` `EXECCTRL`, RP2040 layout (`STATUS_N[3:0]`, `STATUS_SEL[4]`, wrap, `JMP_PIN`, `SIDE_PINDIR`, `SIDE_EN`).
@@ -179,23 +169,27 @@ flowchart TD
   comes back here once the skill exists in `.agents/skills/`.
 * **Verified by**: `cocotb-regression`
 
-### `[SPEC-PIO-06]` Multi-Rate Primary-Paced IMU Auto-DMA Sequence
-* **Requirement**: The PIO tile MUST autonomously ingest high-rate IMU sensors (ICM-42688-P / BMI270) at up to 8 kHz:
-  1. Stall on external physical DRDY pin.
-  2. Latch nanosecond timestamp.
-  3. Command SPI worker to execute multi-register burst (Status $\rightarrow$ Accel $\rightarrow$ Gyro $\rightarrow$ Clear IRQ).
-  4. Stream 64B TLP to host ring buffer.
-* Total CPU utilization during continuous 8 kHz streaming MUST remain **0.0%**.
-* **Implementation Target**: `src/rtl/asp_pio_tlp_shim.sv`, `src/rtl/asp_pio_tile.sv`
-* **Verified by**: `cocotb-regression`, `board-bringup`
+**Moved to AbstractX (2026-10-30, `[SPEC-ICN-09]`)**: the TLP data path with its framing and
+timestamps (formerly SPEC-PIO-04 and SPEC-PIO-10) and the tile's TLP trace packets (formerly SPEC-PIO-07)
+are AbstractX's: the TLP adapters live in AbstractX's `asp_pio_wrap`, on the tile's AXI-Stream FIFO
+ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-*]`) and the trace is
+`[SPEC-TRC-*]` (`INTERCONNECT_SPECIFICATION.md`).
 
-### `[SPEC-PIO-07]` barectf CTF 1.8 Hardware Observability & Timeline Integration
-* **Requirement**: The PIO tile MUST support autonomous binary event tracing compatible with the dynamic barectf CTF 1.8 schema (`trace/barectf_config.yaml`, Stream 5 Timeline Spans). When trace generation is enabled via Wishbone control register:
-  1. The hardware packetizer formats compact binary trace spans for SM execution states (Trigger event, Burst active, Stall/Wait, and FIFO Overrun).
-  2. Each event embeds `tile_id`, `sm_id`, `event_type`, `pc[4:0]`, and duration in clock cycles, timestamped by the 64-bit nanosecond monotonic clock.
-  3. The events flow into the observability plane to display cycle-accurate hardware execution blocks alongside software coroutine lifecycles in the AbstractX Studio Timeline.
-* **Implementation Target**: `src/rtl/asp_pio_tlp_shim.sv`, `src/rtl/asp_pio_tile.sv`
-* **Verified by**: `cocotb-regression`, `host-tests`
+### `[SPEC-PIO-06]` Multi-Rate Primary-Paced IMU Auto-DMA Sequence
+* **Requirement**: the tile and the DMA engine read an SPI IMU (ICM-42688-P / BMI270 class) at up to
+  8 kHz with no host work per sample:
+  1. a PIO program (`src/programs/imu_spi_burst.pio`) waits on the DRDY pin, then clocks one SPI
+     burst (command byte, then N data bytes; mode 0) and pushes the received bytes, packed into words,
+     into its RX FIFO;
+  2. a `TRIGGERED` `OUT` DMA channel (`[SPEC-DMA-01]`) whose trigger is the DRDY pin moves each block
+     of words into its ring, timestamped by the trace (`0x0C` trigger, `0x09` block done);
+  3. the host collects batches from the ring when the stream threshold interrupt fires
+     (`[SPEC-LINK-05]`).
+* Total host work per sample during continuous streaming MUST be **zero**: the host only reads
+  batches.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_core_cocotb.py`: a modelled IMU with
+  DRDY, every sample block in order in the ring, sample rate 8 kHz at 27 MHz), `board-bringup`
+* **Implementation Target**: `src/programs/imu_spi_burst.pio`, `src/rtl/dma/pio2_dma.sv`
 
 ### `[SPEC-PIO-09]` Generic Bidirectional Pins
 * **Requirement**: every pad a tile may use is bidirectional at the board top: output value from
@@ -216,52 +210,6 @@ flowchart TD
   `asp_top` had motor pins as outputs driven by `asp_dshot_core` and the tile pins unconnected.
 * **Verified by**: `rtl-lint`, `cocotb-regression`, `fpga-fit`
 * **Implementation Target**: `rtl/asp_top.sv`, board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`
-
-### `[SPEC-PIO-10]` Generic Per-Tile TLP Data Path
-* **Requirement (ingress)**: a TLP on the tile's configured channel carries up to 10 data words and
-  a state-machine mask; the tile writes word `k` to the TX FIFO of the `k`-th selected state
-  machine in the same clock cycle (so several outputs, e.g. four motors, start together). If a
-  selected TX FIFO is full the whole TLP waits (backpressure); words are never dropped.
-* **Requirement (egress)**: for a configured state-machine mask the tile either gathers one RX
-  word from every selected state machine into one TLP (fixed-size reports), or streams the RX
-  words of one state machine, sending a TLP when `burst_words` are collected or when no word
-  arrived for `idle_timeout` clocks (byte streams). Each TLP carries the timestamp of its first word.
-* **Requirement**: the tile knows nothing about what the words mean; channel, mask, mode, burst
-  size and timeout are registers.
-* **Wire format (both directions, 2026-10-27)**: the 512-bit vector used by `asp_router`: DW0
-  `[511:480]` = {type, flags, tag, channel}, DW1 target address, DW2 {length_dw, sequence}, DW3-DW4
-  timestamp, payload word `k` (k = 0..9) = DW`5+k` = bits `[351-32k -: 32]`, DW15 CRC (not checked).
-  * Ingress: `flags[3:0]` = SM mask, `length_dw` = word count (above 10 is clipped to 10; 0 or an
-    empty mask writes nothing). Words are dealt in groups: with `n` selected SMs, group `g` writes words
-    `g*n .. g*n+n-1` to the selected SMs in ascending SM order, all in one clock, once every SM of
-    the group has TX space; the last group may be partial. So one TLP is 4 motor frames at once
-    (mask `0xF`, 4 words) or 10 bytes for one ESC wire (mask `0x1`, 10 words).
-  * Egress: type `0x10`, `flags[3:0]` = the SM mask, tag and channel from `OUT_CFG`, address =
-    tile base, `length_dw` = words in the TLP, sequence +1 per TLP, timestamp = `i_sys_timestamp`
-    in the clock the first word left the RX FIFOs. A *round* takes one word from every selected
-    SM in the same clock, only when all of them have one; words are stored in SM order. The TLP is
-    sent when it holds at least `burst_words` words, when another round would not fit in 10 words,
-    or when it holds a word and no round happened for `idle_timeout` clocks. Streaming is the
-    same rule with one SM in the mask; gathering (DShot: mask `0xF`, burst 8) is several.
-* **Requirement (ingress queue, why)**: `asp_spi_frontend` holds one received TLP; while
-  `i_tlp_rx_ready` is low the next one is dropped with `overflow_flag`, and the router has one
-  ingress for every channel. A tile that held ingress until a slow program (ESC serial: 0.5 ms per
-  byte) drained its TX FIFOs would drop control TLPs. So the tile copies each accepted TLP into a
-  queue of `IN_SLOTS` (32) entries in block RAM, one word per clock (ingress is held at most 11
-  clocks per TLP), and deals groups from the queue. Ingress waits only when the queue is full. 32
-  slots hold 320 ESC bytes, more than one BLHeli 4-way flash-write message (256 data bytes + header).
-  The host keeps track of queue space by reading `IN_STATUS`; it never needs to stall the router.
-* **Requirement (one owner per FIFO)**: while ingress or egress is enabled for an SM, the host does
-  not also write its TX FIFO / read its RX FIFO over Wishbone (the tile does not arbitrate a
-  word between the two). Two tiles must not use the same ingress channel.
-* **Registers** (offsets from the tile base, [SPEC-PIO-05]): `0x0C OUT_CFG` = `EN[0]`,
-  `MASK[7:4]`, `TAG[15:8]`, `CHANNEL[23:16]`, `BURST_WORDS[27:24]` (1..10; 0 = 10), `TRACE_EN[31]`;
-  `0x90 OUT_TIMEOUT` = idle timeout in clocks `[23:0]` (0 = only `burst_words` sends);
-  `0x94 IN_CFG` = `EN[0]`, `CHANNEL[15:8]`; `0x98 IN_STATUS` (read) = queued TLPs `[5:0]`,
-  `BUSY[8]` (a TLP is being dealt).
-* **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_tlp_path_cocotb.py`), `rtl-lint`,
-  `rtl-synth-check`
-* **Implementation Target**: `src/rtl/asp_pio_tile.sv`, `src/rtl/asp_pio_tlp_ingress.sv`, `src/rtl/asp_pio_tlp_shim.sv`
 
 ### `[SPEC-PIO-11]` Program Library and Loading
 * **Requirement**: programs live as `.pio` sources in `src/programs/`, assembled by the Raspberry
@@ -290,8 +238,9 @@ flowchart TD
   low 1.25 us ('1') / 0.625 us ('0'), each within one fabric clock + 3 % (the `asp_dshot_core`
   criterion) at 12, 27 and 50 MHz, using only the fractional divider.
 * **Requirement**: other variants (one-way DShot150/300/600, PWM/OneShot) are other programs in
-  the library, selected by the host; a frame on all 4 motors starts in the same cycle
-  ([SPEC-PIO-10]).
+  the library, selected by the host. With one `IN` DMA channel per motor (`[SPEC-DMA-01]`) the
+  four frames start within a few clocks of each other; the same cycle needs the four TX FIFOs filled
+  before one `CTRL` write enables the four SMs.
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_dshot_cocotb.py`: frame timing
   and bits at 12/27/50 MHz, modelled ESC reply decoded at nominal and +-3 % ESC clock, no-reply
   words, no frame without data), `board-bringup`
@@ -306,7 +255,8 @@ flowchart TD
   input. TX FIFO bytes (bits [7:0]) go out back to back; after the last stop bit the line is held
   high one more bit (guard), then released. RX: start bit re-checked at its middle (a shorter low
   pulse is not a byte), bits sampled at their centres, one byte per RX word in bits [31:24];
-  received bytes stream to the host with the idle-timeout egress ([SPEC-PIO-10]); nothing is
+  received bytes stream to the host through an `OUT` DMA channel with a `FLUSH` time
+  (`[SPEC-DMA-02]`); nothing is
   received while transmitting. The break is driven by the host through `SMx_INSTR`
   (`set pins, 0` / `set pindirs, 1`) with the state machine stopped.
 * **Requirement (host, not RTL)**: enter only while disarmed; stop the motor state machines; drive
@@ -379,7 +329,7 @@ flowchart TD
   | `DBG_PADOUT`, `DBG_PADOE`, `DBG_CFGINFO` | **missing** | |
   | `SMx_ADDR` (PC), `SMx_INSTR` read (current instruction) | **partial** | PC readable in our status register; current instruction not readable |
   | Register offsets and reset values (`SHIFTCTRL` 0x000C0000, `PINCTRL.SET_COUNT` 5, `EXECCTRL.WRAP_TOP` 31) | **differs** | own map ([SPEC-PIO-05]); `SHIFTCTRL`/`PINCTRL` reset to 0. Host software uses our map; the SDK writes every field it relies on |
-  | DMA DREQ per FIFO | not planned | replaced by the TLP data path ([SPEC-PIO-10]) |
+  | DMA DREQ per FIFO | done | AXI-Stream FIFO ports paced by the handshake, DMA channels (`[SPEC-ICN-09]`, `[SPEC-DMA-01]`) |
   | GPIO count 30, two PIO blocks of 4 SMs | not planned | 32 tile pins; tiles instead of blocks |
 
 * **Verified by**: `cocotb-regression` (rows marked done), review of this table against the datasheet

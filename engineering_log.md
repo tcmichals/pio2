@@ -139,3 +139,28 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   (no RX-full edges) fails `test_fifo_edges`.
 * **Not verified**: the tap and core under formal; the records through the DMA trace channel (no DMA
   yet); AbstractX lint with the new unconnected tile outputs (checked in the AbstractX commit).
+
+## 2026-10-30: Tile split: TLP path out, AXI-Stream FIFO ports in [SPEC-ICN-09]
+
+* **Category**: `product-bug` (found by the new test), `hardware-fact`, `tool-bug`, `process-gap`
+* **What**: `asp_pio_tile` lost `asp_pio_tlp_ingress` / `asp_pio_tlp_shim`, their registers (`0x0C`,
+  `0x90..0x98`), the `SMx + 0x1C` trigger and `i_sys_timestamp`; they go to AbstractX's wrapper. It
+  gained per-SM AXI-Stream TX / RX ports on the FIFOs and `o_obs_active`. SPEC-PIO-04/07/10 left
+  `docs/SPECIFICATION.md` (AbstractX owns them now); SPEC-PIO-06 (IMU auto-DMA) now runs on the DMA
+  engine.
+* **Product bug (new code path, caught before commit)**: a register `RXFx` read captured the head word
+  in its decode clock but popped it one clock later. With the RX stream port running, the stream
+  could take that head word in between: the register read returned a word the stream also got, and
+  the late pop dropped the next word unseen. Now the register pop is combinational, in the clock the
+  data is captured, and the stream is held off in exactly that clock.
+  `test_register_and_stream_share_fifo_exactly_once` failed on the registered pop ("a register read
+  lost or reordered its word") and passes now.
+* **Hardware fact**: the SM's TX FIFO takes a write while full if the SM pulls in the same clock
+  (`asp_pio_sm.sv`, level after the pull), but `o_tx_ready` is the level before the pull. So the stream
+  `TREADY` is conservative, and a register write to a "full" FIFO may still land. A monitor that counts
+  pushes with `ready && valid` undercounts; the test watches the write pointer instead.
+* **Tool bug**: `build/sim/obj` kept Verilator make dependencies with absolute paths from an older
+  checkout location (`/home/...`), so the first rebuild after an RTL change failed ("No rule to make
+  target"). `pio2.debug.build` now deletes `obj/` before each rebuild.
+* **Process gap**: `git stash` (like `git status` without `--ignore-submodules=all`) hangs on this disk
+  because of the submodules; a hung stash had to be killed. Do not use it here.
