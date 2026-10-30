@@ -20,17 +20,8 @@ from pio2.debug.build import build
 from pio2.debug.disasm import listing
 from pio2.programs import load_program
 
-REG_CTRL = 0x00
-REG_IRQ = 0x04
-REG_FSTAT = 0x08
-IRAM = 0x10
-
-
-def SM(n, off):
-    return 0x100 + 0x20 * n + off
-
-
-CLKDIV, EXECCTRL, SHIFTCTRL, PINCTRL, TXF, RXF, INSTR = 0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18
+from pio2.regs import (CLKDIV, DMA_CFG, DMA_CH, DMA_FLUSH, EXECCTRL, INSTR, IRAM, PINCTRL,  # noqa: F401
+                       REG_CTRL, REG_FSTAT, REG_IRQ, RXF, SHIFTCTRL, SM, TRACE_MASK, TXF)
 
 # Per-SM signals the debugger shows; a missing one fails at session start ([SPEC-DBG-01]).
 SM_SIGNALS = ["pc", "reg_x", "reg_y", "isr", "osr", "isr_count", "osr_count", "delay_cycles",
@@ -72,8 +63,11 @@ def _lib():
         "get": ([vp, C.c_char_p, C.POINTER(u32), i32], i32),
         "get_index": ([vp, C.c_char_p, i32, C.POINTER(u32), i32], i32),
         "events_pending": ([vp], u32), "events_drain": ([vp, u32, C.c_void_p], None),
-        "trace_config": ([vp, u32, i32], None),
+        "out_ready": ([vp, i32], None),
         "trace_counters": ([vp, C.POINTER(u32), C.POINTER(u32)], None),
+        "stream_push": ([vp, u32, C.c_void_p, u32], None), "stream_in_pending": ([vp], u32),
+        "stream_out_pending": ([vp, u32], u32),
+        "stream_out_drain": ([vp, u32, u32, C.c_void_p, C.c_void_p], None),
     }
     for name, (args, res) in sig.items():
         f = getattr(lib, "pio2sim_" + name)
@@ -169,11 +163,15 @@ class Session:
     def reset(self):
         self.lib.pio2sim_record(self.h, 0)
         self.lib.pio2sim_reset(self.h, 5)
+        self.ts_base = self.cycle          # the core's timestamp counts clocks from here
+        # Trace on: all types, ring 1 enabled, a partial block leaves after 1 clock ([SPEC-TRC-02]).
+        self.write(TRACE_MASK, 0xFFFF_FFFF)
+        self.write(DMA_CH(1, DMA_FLUSH), 1)
+        self.write(DMA_CH(1, DMA_CFG), 1)
         self._drain_events(keep=False)
         self.programs.clear()
         self.trace = Trace(self.trace.depth)
         self.trace.start = self.cycle
-        self.ts_base = self.cycle          # the core's timestamp counts clocks from here
         self.events = []
         self.lib.pio2sim_record(self.h, 1)
 
@@ -192,8 +190,31 @@ class Session:
                 del self.events[:len(self.events) - 100_000]
 
     def trace_config(self, type_mask=0xFFFF_FFFF, ready=True):
-        """Which record types the core keeps, and whether the reader takes them (False: back-pressure)."""
-        self.lib.pio2sim_trace_config(self.h, type_mask, int(ready))
+        """Which record types the core keeps (TRACE_MASK), and whether the reader takes the core's
+        output stream (False: back-pressure on the trace and every out ring)."""
+        self.write(TRACE_MASK, type_mask)
+        self.lib.pio2sim_out_ready(self.h, int(ready))
+
+    # ---------------------------------------------------------------- DMA streams ([SPEC-ICN-11])
+    def stream_push(self, chan, words):
+        """Queue words for the core's input stream on channel `chan` (TDEST 2..9); they enter as the
+        core takes them while the model runs."""
+        words = [w & 0xFFFF_FFFF for w in words]
+        if words:
+            buf = (C.c_uint32 * len(words))(*words)
+            self.lib.pio2sim_stream_push(self.h, chan, buf, len(words))
+
+    def stream_in_pending(self):
+        return self.lib.pio2sim_stream_in_pending(self.h)
+
+    def stream_out(self, chan):
+        """Words the core sent on output channel `chan` since the last call, as (word, last) pairs."""
+        n = self.lib.pio2sim_stream_out_pending(self.h, chan)
+        if not n:
+            return []
+        words, lasts = (C.c_uint32 * n)(), (C.c_uint8 * n)()
+        self.lib.pio2sim_stream_out_drain(self.h, chan, n, words, lasts)
+        return list(zip(words, (bool(x) for x in lasts)))
 
     def trace_counters(self):
         """(records dropped in the event FIFO, edges merged in the tap)."""

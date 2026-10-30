@@ -11,7 +11,7 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Program library (`src/programs/`) | DShot bidir, ESC serial, conformance, pico-examples; images checked in |
 | Python package (uv) | `pio2-programs`, `pio2-examples`, `pio2-setup-tools`, `pio2-cocotb` |
 | SpecTrace format | done: 45 requirements, 0 broken / drift / unbacked; skills in `.agents/skills` |
-| Interconnect (link, AXI4-Lite / AXI-Stream, DMA, trace, host adapters) | tile AXI4-Lite port and event FIFO built; the rest **specified only** |
+| Interconnect (link, AXI4-Lite / AXI-Stream, DMA, trace, host adapters) | core built: tile, crossbar, DMA + rings, trace, core registers; SPI link and Zynq adapter next |
 | Debugger / simulator / GUI | M1 and M2 working (`pio2-gui`, `pio2-debug`); M3-M7 specified |
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
@@ -30,8 +30,9 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
    2b. [x] Reuse ([SPEC-AXI-05]): Forencich verilog-axi / verilog-axis and ZipCPU wb2axip as pinned
       `third_party/` submodules; licenses checked and recorded (`docs/third_party.md`, `LICENSES/`)
    2c. [x] AbstractX: `asp_pio_wrap` with ZipCPU `wbm2axilite` in front of the tile (AbstractX dded0fc)
-   2d. [ ] `pio2_core` with the fixed boundary ([SPEC-ICN-11]): AXI4-Lite slave, AXI-Stream in / out with
-      the channel in `TDEST`, IRQ; both host adapters attach to it
+   2d. [x] `pio2_core` with the fixed boundary ([SPEC-ICN-11], 2026-10-30): AXI4-Lite slave, AXI-Stream
+      in / out with the channel in `TDEST`, IRQ; core registers at 0x3000; `test_pio2_core_cocotb` with
+      DShot, ESC serial and IMU auto-DMA end to end at 27 MHz
    3. [x] Tile: TLP adapters out, AXI-Stream FIFO ports ([SPEC-ICN-09], 2026-10-30; stream suite with
       register / stream collisions, one product bug fixed); [ ] AbstractX wrapper with the TLP adapters
       (item 6); [x] observation port + `pio2_trace_tap` + `pio2_core` (tile, tap, event FIFO)
@@ -39,9 +40,11 @@ Updated 2026-10-29. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
    4. [ ] SPI PHY single / dual, SCK-clocked + async FIFO ([SPEC-LINK-01]), framer with CRC32
       ([SPEC-LINK-02]), NIC registers ([SPEC-LINK-07])
    5. [ ] Channel mux, credits, `INT_n` ([SPEC-LINK-03..05])
-   6. [ ] AXI4-Lite crossbar ([SPEC-AXI-03]), DMA engine and rings ([SPEC-DMA-01/02])
+   6. [x] AXI4-Lite crossbar ([SPEC-AXI-03]), DMA engine and rings ([SPEC-DMA-01/02]) (2026-10-30:
+      `pio2_dma`, `pio2_dma_chan`, `pio2_axil_regs` with faxil_slave k-induction, 9 DMA tests)
    7. [x] Event FIFO ([SPEC-TRC-01]): Forencich `axis_fifo`, slots, priority, drop and count; 5 tests,
-      2 mutants caught. [ ] DMA trace channel into ring 1 and host CTF conversion ([SPEC-TRC-02])
+      2 mutants caught. [x] DMA trace channel into ring 1 (debugger reads records from channel 1);
+      [ ] host CTF conversion ([SPEC-TRC-02])
    8. [ ] Python host driver with SPI-pins and direct back ends ([SPEC-LINK-06])
 2. [x] Debugger M1: `libpio2sim.so` (Verilator + VPI), `Session`, `pio2-debug` CLI, 13 pytest tests ([SPEC-DBG-01..03, 09]);
    [ ] conformance programs stepped in the debugger vs the cocotb results

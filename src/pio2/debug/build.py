@@ -16,9 +16,8 @@ RTL = ROOT / "src" / "rtl"
 SIM = Path(__file__).resolve().parent / "sim"
 OUT = ROOT / "build" / "sim"
 LIB = OUT / "libpio2sim.so"
-SOURCES = [ROOT / "third_party" / "verilog-axis" / "rtl" / "axis_fifo.v",
-           RTL / "asp_pio_sm.sv", RTL / "asp_pio_tile.sv", RTL / "trace" / "pio2_event_fifo.sv",
-           RTL / "trace" / "pio2_trace_tap.sv", RTL / "pio2_core.sv"]
+SOURCES = [ROOT / line.strip() for line in (RTL / "pio2_core.f").read_text().splitlines()
+           if line.strip() and not line.startswith("#")]
 
 
 def verilator():
@@ -30,7 +29,8 @@ def stale():
     if not LIB.exists():
         return True
     t = LIB.stat().st_mtime
-    return any(p.stat().st_mtime > t for p in [*SOURCES, SIM / "pio2sim.cpp", SIM / "pio2sim.vlt"])
+    deps = [*SOURCES, RTL / "pio2_core.f", SIM / "pio2sim.cpp", SIM / "pio2sim.vlt"]
+    return any(p.stat().st_mtime > t for p in deps)
 
 
 def build(force=False, quiet=True):

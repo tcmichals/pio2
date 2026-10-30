@@ -1,7 +1,8 @@
 // Copyright (C) 2026 Tim Michals
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// libpio2sim: C ABI around the Verilator model of pio2_core (unmodified tile + trace tap + event FIFO).
+// libpio2sim: C ABI around the Verilator model of pio2_core (tile, DMA and rings, trace tap, event FIFO,
+// crossbar), driven through the core's boundary: AXI4-Lite, the two AXI-Stream ports, pins.
 // @impl [SPEC-DBG-01] [SPEC-DBG-13] docs/DEBUGGER_SPECIFICATION.md
 
 #include "Vpio2_core.h"
@@ -11,6 +12,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,7 +24,13 @@ constexpr uint32_t kBase = 0x00000000u;   // the tile's window in pio2_core
 struct Sim {
     VerilatedContext ctx;
     Vpio2_core* top;
-    std::vector<uint64_t> events;   // trace records taken from the core's record stream
+    std::vector<uint64_t> events;   // trace records: channel 1 of the core's output stream
+    uint32_t trace_lo = 0;          // a record is two words, bits [31:0] first
+    bool trace_half = false;
+    struct InWord { uint32_t data; uint8_t dest; bool last; };
+    std::deque<InWord> in_q;        // words for the core's input stream (channel in TDEST)
+    std::vector<uint32_t> out_q[16];   // output-stream words per channel 2..9
+    std::vector<uint8_t> out_last[16];
     uint64_t cycle = 0;
     uint32_t ext = 0;        // levels the parts drive
     uint32_t ext_mask = 0;   // lines the parts drive
@@ -49,8 +57,28 @@ struct Sim {
     // One system clock: inputs settle, rising edge, falling edge.
     void step() {
         top->i_gpio = pads();
+        if (!in_q.empty()) {
+            top->s_axis_tvalid = 1;
+            top->s_axis_tdata = in_q.front().data;
+            top->s_axis_tdest = in_q.front().dest;
+            top->s_axis_tlast = in_q.front().last;
+        } else {
+            top->s_axis_tvalid = 0;
+        }
         top->eval();
-        if (top->m_trace_tvalid && top->m_trace_tready) events.push_back(top->m_trace_tdata);
+        const bool in_taken = top->s_axis_tvalid && top->s_axis_tready;
+        if (top->m_axis_tvalid && top->m_axis_tready) {
+            const uint32_t d = top->m_axis_tdata;
+            const unsigned dest = top->m_axis_tdest & 15u;
+            if (dest == 1) {
+                if (trace_half) events.push_back((static_cast<uint64_t>(d) << 32) | trace_lo);
+                else trace_lo = d;
+                trace_half = !trace_half;
+            } else {
+                out_q[dest].push_back(d);
+                out_last[dest].push_back(top->m_axis_tlast ? 1 : 0);
+            }
+        }
         top->clk = 1;
         top->eval();
         ctx.timeInc(5);
@@ -58,6 +86,7 @@ struct Sim {
         top->eval();
         ctx.timeInc(5);
         ++cycle;
+        if (in_taken) in_q.pop_front();
         top->i_gpio = pads();
         top->eval();
         if (record) {
@@ -112,8 +141,8 @@ void* pio2sim_create() {
     Sim* s = g_sim;
     s->top->clk = 0;
     s->top->rst_n = 0;
-    s->top->i_trace_mask = 0xFFFFFFFFu;
-    s->top->m_trace_tready = 1;
+    s->top->m_axis_tready = 1;
+    s->top->s_axis_tvalid = 0;
     s->top->s_axil_awvalid = 0;
     s->top->s_axil_wvalid = 0;
     s->top->s_axil_arvalid = 0;
@@ -268,17 +297,49 @@ void pio2sim_events_drain(void* h, uint32_t n, uint64_t* out) {
     s->events.erase(s->events.begin(), s->events.begin() + n);
 }
 
-void pio2sim_trace_config(void* h, uint32_t type_mask, int ready) {
+// Whether the reader takes the core's output stream (0: back-pressure). The type mask is a register
+// (TRACE_MASK, 0x2000), written by Session through pio2sim_write.
+void pio2sim_out_ready(void* h, int ready) {
     Sim* s = static_cast<Sim*>(h);
-    s->top->i_trace_mask = type_mask;
-    s->top->m_trace_tready = ready ? 1 : 0;
+    s->top->m_axis_tready = ready ? 1 : 0;
     s->top->eval();
 }
 
 void pio2sim_trace_counters(void* h, uint32_t* dropped, uint32_t* merged) {
     Sim* s = static_cast<Sim*>(h);
-    *dropped = s->top->o_trace_dropped;
-    *merged = s->top->o_trace_merged;
+    auto core = [](const char* n) {
+        return read32(vpi_handle_by_name(const_cast<PLI_BYTE8*>(n), nullptr));
+    };
+    *dropped = core("TOP.pio2_core.trace_dropped");
+    *merged = core("TOP.pio2_core.tap_merged") + core("TOP.pio2_core.dma_merged");
+    (void)s;
+}
+
+// Queue words for the core's input stream on channel `chan` (TDEST); TLAST on the last one.
+void pio2sim_stream_push(void* h, uint32_t chan, const uint32_t* words, uint32_t n) {
+    Sim* s = static_cast<Sim*>(h);
+    for (uint32_t i = 0; i < n; ++i)
+        s->in_q.push_back({words[i], static_cast<uint8_t>(chan & 15u), i + 1 == n});
+}
+
+uint32_t pio2sim_stream_in_pending(void* h) {
+    return static_cast<uint32_t>(static_cast<Sim*>(h)->in_q.size());
+}
+
+// Words the core sent on output channel `chan` (2..9) since the last drain; lasts[i] = TLAST.
+uint32_t pio2sim_stream_out_pending(void* h, uint32_t chan) {
+    return static_cast<uint32_t>(static_cast<Sim*>(h)->out_q[chan & 15u].size());
+}
+
+void pio2sim_stream_out_drain(void* h, uint32_t chan, uint32_t n, uint32_t* words, uint8_t* lasts) {
+    Sim* s = static_cast<Sim*>(h);
+    auto& q = s->out_q[chan & 15u];
+    auto& l = s->out_last[chan & 15u];
+    n = n < q.size() ? n : static_cast<uint32_t>(q.size());
+    std::memcpy(words, q.data(), n * sizeof(uint32_t));
+    std::memcpy(lasts, l.data(), n);
+    q.erase(q.begin(), q.begin() + n);
+    l.erase(l.begin(), l.begin() + n);
 }
 
 }  // extern "C"

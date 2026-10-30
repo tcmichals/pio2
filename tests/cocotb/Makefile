@@ -13,7 +13,16 @@ MODULE ?= test_asp_pio_cocotb
 PIO2_ROOT ?= $(abspath $(CURDIR)/../..)
 AXIS_DIR = $(PIO2_ROOT)/third_party/verilog-axis/rtl
 
-ifeq ($(TOPLEVEL),pio2_event_fifo)
+CORE_FILES = $(addprefix $(PIO2_ROOT)/,$(shell grep -v '^\#' $(PIO2_ROOT)/src/rtl/pio2_core.f))
+
+ifeq ($(TOPLEVEL),pio2_core)
+VERILOG_SOURCES = $(PIO2_ROOT)/src/rtl/third_party.vlt $(CORE_FILES)
+ifeq ($(MODULE),test_pio2_dma_cocotb)
+SIM_PARAMS ?= -GRING_WORDS=16
+endif
+else ifeq ($(TOPLEVEL),pio2_axil_regs)
+VERILOG_SOURCES = $(PIO2_ROOT)/src/rtl/axi/pio2_axil_regs.sv
+else ifeq ($(TOPLEVEL),pio2_event_fifo)
 VERILOG_SOURCES = $(AXIS_DIR)/axis_fifo.v $(RTL_DIR)/trace/pio2_event_fifo.sv
 SIM_PARAMS ?= -GDEPTH=16
 else

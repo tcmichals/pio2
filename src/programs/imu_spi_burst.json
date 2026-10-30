@@ -1,0 +1,32 @@
+{
+  "source": "src/programs/imu_spi_burst.pio",
+  "assembler": "pioasm (Pico SDK)",
+  "programs": [
+    {
+      "name": "imu_spi_burst",
+      "instructions": [
+        8353,
+        57344,
+        41186,
+        57383,
+        24577,
+        4164,
+        24632,
+        45122,
+        20481,
+        71,
+        57345,
+        8225
+      ],
+      "wrap_target": 0,
+      "wrap": 11,
+      "origin": -1,
+      "sideset": {
+        "size": 1,
+        "optional": false,
+        "pindirs": false
+      },
+      "labels": {}
+    }
+  ]
+}

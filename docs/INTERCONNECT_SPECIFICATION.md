@@ -292,9 +292,10 @@ AXI4-Lite crossbar, like every other block.
   FIFO -> ring -> host) or `IN` (host -> ring -> PIO TX FIFO).
 * **Requirement (modes)**: `ONE_SHOT` (N words after a start, then done), `RING` (continuous),
   `TRIGGERED` (each trigger allows one more block of N words; trigger = rising edge of a PIO IRQ flag or
-  of an input pin, e.g. IMU DRDY, or a software trigger), `DIRECT` (no ring: the link stream feeds the
-  TX FIFO, or the RX FIFO feeds the link one word per block, back-pressured by `TREADY`; low latency,
-  low rate). Mode, direction, SM, N and the trigger are registers; a channel acts only while enabled.
+  of an input pin, e.g. IMU DRDY, or a software trigger), `DIRECT` (lowest latency, low rate: on the
+  way out each word is its own block, offered at once without waiting for `FRAME_WORDS` or `FLUSH`; on
+  the way in as `RING`. Words still pass through the ring FIFO, a few clocks, so the core's output
+  stays AXI-Stream legal even when the register port reads the same RX FIFO; decision 2026-10-30). Mode, direction, SM, N and the trigger are registers; a channel acts only while enabled.
   When two enabled channels name the same FIFO, the lower-numbered one owns it. Register access to the
   FIFOs (TXFx / RXFx) keeps working; in a clock where the register port writes TXFx or reads RXFx the
   tile holds off the stream (`[SPEC-ICN-09]`), so no word is lost or duplicated.
@@ -314,7 +315,7 @@ AXI4-Lite crossbar, like every other block.
   | `0x00` | `CFG` | `EN[0]`, `DIR[1]` (0 `OUT`, 1 `IN`), `MODE[3:2]` (0 `ONE_SHOT`, 1 `RING`, 2 `TRIGGERED`, 3 `DIRECT`), `SM[5:4]`, `TRIG_PIN[6]` (0: IRQ flag, 1: input pin), `TRIG_IDX[12:8]` |
   | `0x04` | `COUNT` | N, words per block `[15:0]` (0 = 65536) |
   | `0x08` | `LEVEL` | words in the ring `[15:0]`, free words `[31:16]` (read only) |
-  | `0x0C` | `STATUS` | `DONE[0]` (W1C), `BUSY[1]`, `REMAINING[31:16]` |
+  | `0x0C` | `STATUS` | `DONE[0]` (read; cleared through `DMA_DONE`, `[SPEC-ICN-11]`), `BUSY[1]`, `REMAINING[31:16]` |
   | `0x10` | `MOVED` | words moved (read; write clears) |
   | `0x14` | `UNDERRUNS` | saturating (write clears) |
   | `0x18` | `OVERRUNS` | saturating (write clears) |
@@ -326,6 +327,8 @@ AXI4-Lite crossbar, like every other block.
   `0x1000` itself is `DMA_CAPS` (read): ring words per channel `[15:0]`, frame words `[23:16]`. For
   channel 1 only `EN`, `LEVEL`, `MOVED`, `FLUSH`, `THR` and `CTRL.RESET_RING` apply (it is always a
   `RING` `OUT` channel fed by the event FIFO). `ONE_SHOT` starts when `EN` goes to 1 or on `START`.
+  `RESET_RING` empties the ring; on an `OUT` ring it waits until the block being sent is complete, so a
+  block on the output stream is never cut short.
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_pio2_dma_cocotb.py`: each mode, DREQ pacing,
   underrun / overrun counted once per start, register FIFO access mixed with DMA, 1000-block steady
   state)
@@ -339,7 +342,8 @@ AXI4-Lite crossbar, like every other block.
   (`[SPEC-LINK-04]`) and the interrupt thresholds (`[SPEC-LINK-05]`).
 * **Requirement (out to the host)**: an `OUT` ring (and ring 1) offers one block to the core's output
   stream (`[SPEC-ICN-11]`) when it holds `FRAME_WORDS` words (default 28, one link frame,
-  `[SPEC-LINK-02]`), or when it holds fewer and the oldest has waited `FLUSH` clocks; the block has
+  `[SPEC-LINK-02]`), when the ring is full (a ring smaller than a frame), or when it holds fewer and
+  the oldest has waited `FLUSH` clocks; the block has
   `TLAST` on its last word and `TDEST` = channel. Blocks of all out rings are merged whole, round robin.
 * **Requirement (in from the host)**: the core's input stream is split by `TDEST` to the `IN` rings
   (`DIRECT`: to the TX FIFO). A word for a channel that is not an enabled `IN` channel is dropped and

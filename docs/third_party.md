@@ -7,8 +7,8 @@ edits their files ([SPEC-AXI-05] in `docs/INTERCONNECT_SPECIFICATION.md`). Clone
 
 | Path | Project | Author | License | Pinned commit | Used for |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `third_party/verilog-axi` | <https://github.com/alexforencich/verilog-axi> | Alex Forencich | MIT (its `COPYING`) | `516bd5dadc3365b7f9e225d2af8fe0b8d804fe53` (2025-02-27) | AXI4-Lite crossbar / interconnect, register slices |
-| `third_party/verilog-axis` | <https://github.com/alexforencich/verilog-axis> | Alex Forencich | MIT (its `COPYING`) | `48ff7a7e2ef782cf778d47910cf85835c64b1bce` (2025-02-27) | AXI-Stream FIFOs (sync / async), arbiters, muxes |
+| `third_party/verilog-axi` | <https://github.com/alexforencich/verilog-axi> | Alex Forencich | MIT (its `COPYING`) | `516bd5dadc3365b7f9e225d2af8fe0b8d804fe53` (2025-02-27) | `axil_crossbar` (+ `_addr`, `_rd`, `_wr`, `axil_register_rd/wr`): pio2_core's crossbar ([SPEC-AXI-03]) |
+| `third_party/verilog-axis` | <https://github.com/alexforencich/verilog-axis> | Alex Forencich | MIT (its `COPYING`) | `48ff7a7e2ef782cf778d47910cf85835c64b1bce` (2025-02-27) | `axis_fifo` (event FIFO, DMA rings), `axis_adapter` (trace 64 -> 32 bits), `axis_arb_mux` + `arbiter` + `priority_encoder` (core output merge) ([SPEC-TRC-01], [SPEC-DMA-02]). verilog-axi has its own `arbiter` / `priority_encoder`, which differ only in how the reset branch is written; the verilog-axis copies serve both (`src/rtl/pio2_core.f`) |
 | `third_party/wb2axip` | <https://github.com/ZipCPU/wb2axip> | Dan Gisselquist, Gisselquist Technology, LLC (ZipCPU, <https://github.com/ZipCPU>) | Apache-2.0 (stated in every file header and its README; the text is in `LICENSES/Apache-2.0.txt`) | `2e8d3bc2d26ddc33d1881022a2a2b9d3f0c16b9b` (2026-06-02) | formal property files `bench/formal/faxil_slave.v`, `faxil_master.v`, `faxis_master.v`, `faxis_slave.v` ([SPEC-VER-01]); `rtl/wbm2axilite.v` for AbstractX's Wishbone bridge |
 
 Other third-party content inside pio2's own tree:

@@ -127,7 +127,9 @@ def test_stalled_pull_is_not_retired(s):
     assert s.step_instr(0, limit=200) == 200            # never retired
     assert s.sm_state(0)["pc"] == 0
     s.push(0, 3)                                        # the write's own clocks let the pull finish
-    assert s.sm_state(0)["pc"] == 1 and not s.sm_state(0)["stalled"]
+    # (how many instructions run during the write depends on the access latency through the core's
+    # crossbar; the point is that the pull retired)
+    assert s.sm_state(0)["pc"] != 0 and not s.sm_state(0)["stalled"]
 
 
 def test_step_instr_runs_one_clock_at_divider_1(s):

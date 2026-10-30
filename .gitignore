@@ -11,3 +11,5 @@ pio_tile_axil_*/
 pio_tile_axil/
 *.ini
 .claude/worktrees/
+tests/formal/*_bmc/
+tests/formal/*_prove/

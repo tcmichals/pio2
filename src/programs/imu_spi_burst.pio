@@ -1,0 +1,31 @@
+; Copyright (C) 2026 Tim Michals
+; SPDX-License-Identifier: GPL-3.0-or-later
+;
+; IMU auto-DMA ([SPEC-PIO-06]): wait for DRDY, clock one SPI burst (mode 0), push the received
+; bits as 32-bit words. With a TRIGGERED OUT DMA channel on the DRDY pin, no host work per sample.
+;
+; Clock: 3 SM cycles per SPI bit while reading (SCK = SM clock / 3), 2 while sending the command.
+; Pins: OUT base = MOSI, IN base = MISO, IN base + 1 = DRDY, SET base = CS (active low),
+;       side-set base = SCK (one bit, not optional).
+; Shift: left (MSB first) for IN and OUT; autopush at 32. No autopull.
+; Y:     set once by the host (pull + mov y, osr through SMx_INSTR) to
+;        {command byte [31:24], bits to read - 1 [23:0]}; bits to read is a multiple of 32.
+
+.program imu_spi_burst
+.side_set 1
+.wrap_target
+    wait 1 pin 1        side 0  ; DRDY high: a sample is ready
+    set pins, 0         side 0  ; CS low
+    mov osr, y          side 0
+    set x, 7            side 0
+cmd:
+    out pins, 1         side 0  ; MOSI changes while SCK is low
+    jmp x-- cmd         side 1  ; the IMU samples on the rising edge
+    out x, 24           side 0  ; X = bits to read - 1 (the rest of Y)
+rd:
+    nop                 side 1  ; SCK rises; the IMU's bit is stable
+    in pins, 1          side 1  ; sample MISO
+    jmp x-- rd          side 0  ; SCK falls; the IMU shifts out the next bit
+    set pins, 1         side 0  ; CS high
+    wait 0 pin 1        side 0  ; DRDY low again before the next sample
+.wrap

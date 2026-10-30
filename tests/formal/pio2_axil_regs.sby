@@ -1,0 +1,26 @@
+# ZipCPU faxil_slave on pio2_axil_regs ([SPEC-AXI-01], [SPEC-VER-01]).
+#   cd tests/formal && sby -f pio2_axil_regs.sby bmc     # bounded, 30 clocks
+#   cd tests/formal && sby -f pio2_axil_regs.sby prove   # k-induction (unbounded)
+[tasks]
+bmc
+prove
+
+[options]
+bmc: mode bmc
+prove: mode prove
+depth 30
+multiclock off
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal faxil_slave.v
+read -sv pio2_axil_regs.sv
+read -formal pio2_axil_regs_f.sv
+prep -top pio2_axil_regs_f
+
+[files]
+../../third_party/wb2axip/bench/formal/faxil_slave.v
+../../src/rtl/axi/pio2_axil_regs.sv
+pio2_axil_regs_f.sv

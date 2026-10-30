@@ -164,3 +164,33 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   target"). `pio2.debug.build` now deletes `obj/` before each rebuild.
 * **Process gap**: `git stash` (like `git status` without `--ignore-submodules=all`) hangs on this disk
   because of the submodules; a hung stash had to be killed. Do not use it here.
+
+## 2026-10-30: DMA engine, rings, crossbar and core registers; pio2_core boundary [SPEC-DMA-*] [SPEC-ICN-11]
+
+* **Category**: `process-gap` (feature), `false-alarm` (tests), `tool-bug`, `hardware-fact`
+* **What**: `pio2_dma` (eight PIO channels + trace channel 1, registers at 0x1000, routing to the tile's
+  stream ports, TDEST split in, Forencich `axis_arb_mux` out), `pio2_dma_chan` (ring = Forencich
+  `axis_fifo` with an exact occupancy counter, modes, counters, events, out packetizer),
+  `pio2_axil_regs` (one AXI4-Lite front end for our register blocks), `pio2_core_regs` (trace and core
+  windows, ISR / IMR), Forencich `axil_crossbar` in `pio2_core`. The debugger simulates the new core:
+  trace records come from channel 1 of the output stream; Session gained stream_push / stream_out.
+* **Design decisions (spec updated first)**: one BRAM FIFO per ring instead of a shared ring RAM (no
+  arbitration, exact level); DIRECT still passes through the ring (so the core's output stays
+  AXI-Stream legal when the register port reads the same RX FIFO); a full ring is offered as a block
+  at once (a ring smaller than a frame otherwise waits for FLUSH and counts overruns); RESET_RING waits
+  for an out block in progress; STATUS.DONE is a mirror of DMA_DONE; TRACE_MASK resets to 0.
+* **Hardware fact**: Forencich's `axil_crossbar` decodes one address at a time per direction: about 4
+  clocks per register transaction through the core; `pio2_axil_regs` alone takes one per clock.
+  `axis_fifo`'s `status_depth` leaves out the words in its output stage, so it cannot be the ring level.
+* **False alarms (tests)**: cocotbext-axi streams without TKEEP default to byte lanes (words came out
+  as bytes; `byte_size=32` fixes it); the IMU model left DRDY at the pull-up level before it started,
+  so the PIO ran one burst without a trigger edge (20 bursts, 19 triggers); a model register block
+  updated i_rdata one clock late; an overrun count assumed no flicker when the reader resumes.
+* **Tool bug**: Verilator in cocotb stops on third-party lint warnings (ASCRANGE, CASEINCOMPLETE in
+  `axil_crossbar_*`); `src/rtl/third_party.vlt` turns lint off for `third_party/` only. A single big
+  `always_comb` mixing both directions of the routing looked like a combinational loop (UNOPTFLAT);
+  split per direction.
+* **Evidence**: cocotb 10/10 suites (new: dma 9, core 6, axil_regs 3); pytest 442 passed;
+  `sby pio2_axil_regs.sby bmc` and `prove` (k-induction) pass; two mutants (BVALID dropped without
+  BREADY, ARREADY while RVALID pending) fail on ZipCPU's own properties with the invariants removed.
+* **Not verified**: AXI-Stream ports under faxis properties; Icarus for the new suites; synthesis.
