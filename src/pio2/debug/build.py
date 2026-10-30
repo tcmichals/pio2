@@ -38,7 +38,7 @@ def build(force=False, quiet=True):
     if not force and not stale():
         return LIB
     OUT.mkdir(parents=True, exist_ok=True)
-    cmd = [verilator(), "--cc", "--exe", "--build", "--vpi", "-O2", "-j", str(os.cpu_count() or 2),
+    cmd = [verilator(), "--cc", "--exe", "--build", "--vpi", "--savable", "-O2", "-j", str(os.cpu_count() or 2),
            "--top-module", "pio2_core", "-Wno-fatal", "-Mdir", str(OUT / "obj"), "-o", str(LIB),
            "-CFLAGS", "-fPIC -O2", "-LDFLAGS", "-shared",
            str(SIM / "pio2sim.vlt"), *map(str, SOURCES), str(SIM / "pio2sim.cpp")]

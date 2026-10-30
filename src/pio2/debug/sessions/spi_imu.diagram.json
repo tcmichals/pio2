@@ -1,0 +1,47 @@
+{
+  "pio2_diagram": 1,
+  "title": "SPI IMU with DRDY (GPIO 16-20)",
+  "about": "pico-examples spi_cpha0_cs (SCK and CSn by side-set, 8-bit frames, clock divider 8): the host waits for DRDY, then reads the 12 sample bytes of a simulated IMU (register image).",
+  "parts": [
+    {
+      "type": "imu",
+      "name": "IMU",
+      "pins": {
+        "sck": 18,
+        "mosi": 17,
+        "miso": 16,
+        "cs": 19,
+        "drdy": 20
+      },
+      "attrs": {
+        "who_am_i_reg": 117,
+        "who_am_i": 71,
+        "data_reg": 31,
+        "odr_clocks": 25000,
+        "drdy_clocks": null,
+        "latency": 4,
+        "idle_horizon": 64,
+        "regs": {}
+      }
+    }
+  ],
+  "probes": [
+    19,
+    18,
+    17,
+    16,
+    20
+  ],
+  "labels": {
+    "16": "MISO",
+    "17": "MOSI",
+    "18": "SCK",
+    "19": "CSn",
+    "20": "DRDY"
+  },
+  "view": {
+    "speed": 500,
+    "window": 6000
+  },
+  "reference": ""
+}

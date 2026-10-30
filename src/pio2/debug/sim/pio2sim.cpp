@@ -6,6 +6,7 @@
 
 #include "Vpio2_core.h"
 #include "verilated.h"
+#include "verilated_save.h"
 #include "verilated_vpi.h"
 #include "vpi_user.h"
 
@@ -27,6 +28,7 @@ struct Sim {
     uint32_t ext = 0;        // levels the parts drive
     uint32_t ext_mask = 0;   // lines the parts drive
     uint32_t pull = 0xFFFFFFFFu;   // level of a line nobody drives
+    uint32_t oe_inv = 0;     // lines whose output enable the IO block inverts (RP2040 GPIO OEOVER)
     std::unordered_map<std::string, vpiHandle> handles;
     vpiHandle sm_pc[4] = {};
     vpiHandle sm_stall[4] = {};
@@ -40,8 +42,10 @@ struct Sim {
     Sim() { top = new Vpio2_core(&ctx, "TOP"); }
     ~Sim() { top->final(); delete top; }
 
+    uint32_t pad_dir() const { return top->o_gpio_pindir ^ oe_inv; }
+
     uint32_t pads() const {
-        const uint32_t out = top->o_gpio_out, dir = top->o_gpio_pindir;
+        const uint32_t out = top->o_gpio_out, dir = pad_dir();
         const uint32_t outside = (ext & ext_mask) | (pull & ~ext_mask);
         return (out & dir) | (outside & ~dir);
     }
@@ -61,7 +65,7 @@ struct Sim {
         top->i_gpio = pads();
         top->eval();
         if (record) {
-            Rec r{top->o_gpio_out, top->o_gpio_pindir, pads(), {}, {}};
+            Rec r{top->o_gpio_out, pad_dir(), pads(), {}, {}};
             for (int m = 0; m < 4; ++m) {
                 r.pc[m] = static_cast<uint8_t>(read32_fn(sm_pc[m]));
                 r.stall[m] = static_cast<uint8_t>(read32_fn(sm_stall[m]));
@@ -70,6 +74,42 @@ struct Sim {
         }
     }
     static uint32_t read32_fn(vpiHandle h);
+};
+
+// Verilator save / restore into memory instead of a file ([SPEC-DBG-06] snapshots).
+class MemSave final : public VerilatedSerialize {
+public:
+    std::vector<uint8_t> data;
+    MemSave() { m_isOpen = true; m_cp = m_bufp; header(); }
+    void finish() { trailer(); flush(); m_isOpen = false; }
+    void flush() override {
+        data.insert(data.end(), m_bufp, m_cp);
+        m_cp = m_bufp;
+    }
+};
+
+class MemRestore final : public VerilatedDeserialize {
+    const uint8_t* m_src;
+    size_t m_left;
+public:
+    MemRestore(const uint8_t* src, size_t n) : m_src(src), m_left(n) {
+        m_isOpen = true;
+        m_cp = m_endp = m_bufp;
+        header();
+    }
+    void finish() { trailer(); m_isOpen = false; }
+    void fill() override {
+        uint8_t* rp = m_bufp;
+        for (const uint8_t* sp = m_cp; sp < m_endp; *rp++ = *sp++) {}
+        m_endp = m_bufp + (m_endp - m_cp);
+        m_cp = m_bufp;
+        const size_t room = static_cast<size_t>(m_bufp + bufferSize() - m_endp);
+        const size_t n = room < m_left ? room : m_left;
+        std::memcpy(m_endp, m_src, n);
+        m_endp += n;
+        m_src += n;
+        m_left -= n;
+    }
 };
 
 Sim* g_sim = nullptr;   // VPI names one design per process
@@ -155,7 +195,7 @@ void pio2sim_set_ext(void* h, uint32_t value, uint32_t mask, uint32_t pull) {
 }
 
 uint32_t pio2sim_gpio_out(void* h) { return static_cast<Sim*>(h)->top->o_gpio_out; }
-uint32_t pio2sim_gpio_dir(void* h) { return static_cast<Sim*>(h)->top->o_gpio_pindir; }
+uint32_t pio2sim_gpio_dir(void* h) { return static_cast<Sim*>(h)->pad_dir(); }
 uint32_t pio2sim_gpio_in(void* h) { return static_cast<Sim*>(h)->pads(); }
 
 // Run n clocks (recorded in the pending queue when recording is on).
@@ -279,6 +319,55 @@ void pio2sim_trace_counters(void* h, uint32_t* dropped, uint32_t* merged) {
     Sim* s = static_cast<Sim*>(h);
     *dropped = s->top->o_trace_dropped;
     *merged = s->top->o_trace_merged;
+}
+
+// Lines whose output enable is inverted at the pad (RP2040 gpio_set_oeover INVERT, used by the
+// pico-examples I2C program for open-drain). Default 0: the pad loop is unchanged.
+void pio2sim_set_oe_invert(void* h, uint32_t mask) {
+    Sim* s = static_cast<Sim*>(h);
+    s->oe_inv = mask;
+    s->top->i_gpio = s->pads();
+    s->top->eval();
+}
+
+// Snapshot of the whole model (Verilator --savable) plus the wrapper's own state, into an internal
+// buffer; returns its size, pio2sim_snapshot_copy copies it out ([SPEC-DBG-06]). Recorded clocks and
+// trace records not yet drained are not part of a snapshot (the caller drains first).
+static std::vector<uint8_t> g_snap;
+
+uint32_t pio2sim_snapshot(void* h) {
+    Sim* s = static_cast<Sim*>(h);
+    MemSave os;
+    static_cast<VerilatedSerialize&>(os) << &s->ctx << *s->top;
+    os.write(&s->cycle, sizeof s->cycle);
+    os.write(&s->ext, sizeof s->ext);
+    os.write(&s->ext_mask, sizeof s->ext_mask);
+    os.write(&s->pull, sizeof s->pull);
+    os.write(&s->oe_inv, sizeof s->oe_inv);
+    os.finish();
+    g_snap.swap(os.data);
+    return static_cast<uint32_t>(g_snap.size());
+}
+
+void pio2sim_snapshot_copy(void* h, uint8_t* out) {
+    (void)h;
+    std::memcpy(out, g_snap.data(), g_snap.size());
+}
+
+// Restore a snapshot made by pio2sim_snapshot (same library build). Drops undrained records.
+void pio2sim_restore(void* h, const uint8_t* data, uint32_t n) {
+    Sim* s = static_cast<Sim*>(h);
+    MemRestore is(data, n);
+    static_cast<VerilatedDeserialize&>(is) >> &s->ctx >> *s->top;
+    is.read(&s->cycle, sizeof s->cycle);
+    is.read(&s->ext, sizeof s->ext);
+    is.read(&s->ext_mask, sizeof s->ext_mask);
+    is.read(&s->pull, sizeof s->pull);
+    is.read(&s->oe_inv, sizeof s->oe_inv);
+    is.finish();
+    s->pending.clear();
+    s->events.clear();
+    s->top->eval();
 }
 
 }  // extern "C"

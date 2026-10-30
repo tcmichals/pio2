@@ -1,0 +1,36 @@
+{
+  "pio2_diagram": 1,
+  "title": "ESC serial passthrough on GPIO 2 (19200 8N1)",
+  "about": "esc_serial.pio: the 4-way passthrough wire, half duplex: bytes out, one guard bit, the line released, the ESC's answer received. The ESC is scripted (a reply shaped like a BLHeli bootloader BootInfo; illustrative, not a BLHeli implementation). 27 MHz system clock.",
+  "parts": [
+    {
+      "type": "esc",
+      "name": "ESC",
+      "pins": {
+        "pin": 2
+      },
+      "attrs": {
+        "mode": "serial",
+        "baud_clocks": 1406.25,
+        "turnaround_clocks": 2813,
+        "f_sys": 27000000,
+        "script": {
+          "0000000000000000000d424c48656c69f47d": "343731e8b2060430",
+          "*": "30"
+        }
+      }
+    }
+  ],
+  "probes": [
+    2
+  ],
+  "labels": {
+    "2": "ESC"
+  },
+  "view": {
+    "speed": 4000,
+    "window": 300000,
+    "f_sys": 27000000
+  },
+  "reference": ""
+}

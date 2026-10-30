@@ -1,0 +1,31 @@
+{
+  "pio2_diagram": 1,
+  "title": "WS2812 strip on GPIO 2",
+  "about": "pico-examples ws2812: side-set drives the data line, 10 SM clocks per bit at 800 kHz; a host script sends 8 LEDs per frame (a moving rainbow) with the 50 us reset between frames.",
+  "reference": "Wokwi Pi Pico ws2812 example (NeoPixel ring): same bit timing, T1 3 / T2 3 / T3 4.",
+  "parts": [
+    {
+      "type": "ws2812",
+      "name": "Strip",
+      "pins": {
+        "pin": 2
+      },
+      "attrs": {
+        "n_leds": 8,
+        "bit_clocks": 156.25,
+        "reset_clocks": 6250,
+        "threshold": 0.45
+      }
+    }
+  ],
+  "probes": [
+    2
+  ],
+  "labels": {
+    "2": "DIN"
+  },
+  "view": {
+    "speed": 2000,
+    "window": 40000
+  }
+}

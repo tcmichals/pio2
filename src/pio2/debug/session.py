@@ -74,6 +74,9 @@ def _lib():
         "events_pending": ([vp], u32), "events_drain": ([vp, u32, C.c_void_p], None),
         "trace_config": ([vp, u32, i32], None),
         "trace_counters": ([vp, C.POINTER(u32), C.POINTER(u32)], None),
+        "set_oe_invert": ([vp, u32], None),
+        "snapshot": ([vp], u32), "snapshot_copy": ([vp, C.c_void_p], None),
+        "restore": ([vp, C.c_char_p, u32], None),
     }
     for name, (args, res) in sig.items():
         f = getattr(lib, "pio2sim_" + name)
@@ -104,6 +107,19 @@ class Event:
     @property
     def name(self):
         return EVENT_NAMES.get(self.type, f"type 0x{self.type:02x}")
+
+
+@dataclass
+class Snapshot:
+    cycle: int
+    model: bytes
+    ext: int
+    ext_mask: int
+    pull: int
+    oe_invert: int
+    programs: dict
+    ts_base: int
+    events_total: int
 
 
 class Trace:
@@ -149,6 +165,8 @@ class Session:
         self.ext = 0
         self.ext_mask = 0
         self.pull_level = 0xFFFF_FFFF
+        self.oe_invert = 0
+        self.events_total = 0              # trace records taken since reset (snapshots count them)
         for name in TILE_SIGNALS + [f"gen_sm[0].u_sm.{s}" for s in SM_SIGNALS]:
             if self._get(name) is None:
                 raise SimError(f"RTL signal {name!r} not found (renamed?): update SM_SIGNALS")
@@ -175,6 +193,7 @@ class Session:
         self.trace.start = self.cycle
         self.ts_base = self.cycle          # the core's timestamp counts clocks from here
         self.events = []
+        self.events_total = 0
         self.lib.pio2sim_record(self.h, 1)
 
     def _drain_events(self, keep=True):
@@ -188,6 +207,7 @@ class Session:
                 ts = rec >> 32
                 self.events.append(Event(self.ts_base + ts - TAP_LATENCY, ts, rec >> 24 & 0xFF, rec >> 16 & 0xFF,
                                          rec & 0xFFFF))
+            self.events_total += n
             if len(self.events) > 100_000:
                 del self.events[:len(self.events) - 100_000]
 
@@ -240,10 +260,68 @@ class Session:
             self.ext = (self.ext & ~(1 << pin)) | ((level & 1) << pin)
         self.lib.pio2sim_set_ext(self.h, self.ext, self.ext_mask, self.pull_level)
 
+    def release_all(self):
+        """No part drives any line."""
+        self.ext = self.ext_mask = 0
+        self.lib.pio2sim_set_ext(self.h, self.ext, self.ext_mask, self.pull_level)
+
+    def set_pins(self, sm, pins_mask, values):
+        """Set pin output levels with `set pins` through SMx_INSTR, one pin at a time (as
+        pio_sm_set_pins_with_mask does)."""
+        old = self.read(SM(sm, PINCTRL))
+        for pin in range(32):
+            if pins_mask >> pin & 1:
+                self.write(SM(sm, PINCTRL), (pin << 5) | (1 << 26))
+                self.write(SM(sm, INSTR), 0xE000 | ((values >> pin) & 1))
+        self.write(SM(sm, PINCTRL), old)
+
+    def exec(self, sm, word):
+        """Run one instruction on SM `sm` now (SMx_INSTR, as pio_sm_exec)."""
+        self.write(SM(sm, INSTR), word & 0xFFFF)
+
     def set_pull(self, level_mask):
         """Level each undriven line reads (bit n = line n; default all high, as with pull-ups)."""
         self.pull_level = level_mask & 0xFFFF_FFFF
         self.lib.pio2sim_set_ext(self.h, self.ext, self.ext_mask, self.pull_level)
+
+    def set_oe_invert(self, mask):
+        """Invert the output enable of these lines at the pad (RP2040 `gpio_set_oeover` INVERT),
+        as the pico-examples I2C program needs for open-drain lines."""
+        self.oe_invert = mask & 0xFFFF_FFFF
+        self.lib.pio2sim_set_oe_invert(self.h, self.oe_invert)
+
+    # ---------------------------------------------------------------- snapshots ([SPEC-DBG-06])
+    # @impl [SPEC-DBG-06] docs/DEBUGGER_SPECIFICATION.md
+    def snapshot(self):
+        """The whole model state now (Verilator save) and the Session's own state."""
+        self._drain()
+        n = self.lib.pio2sim_snapshot(self.h)
+        buf = C.create_string_buffer(n)
+        self.lib.pio2sim_snapshot_copy(self.h, buf)
+        return Snapshot(self.cycle, buf.raw, self.ext, self.ext_mask, self.pull_level, self.oe_invert,
+                        dict(self.programs), self.ts_base, self.events_total)
+
+    def restore(self, snap):
+        """Go back (or forward) to a snapshot. The trace and the trace records after it are dropped;
+        clocks before it stay in the trace when they are still there."""
+        self._drain()
+        self.lib.pio2sim_restore(self.h, snap.model, len(snap.model))
+        self.ext, self.ext_mask, self.pull_level, self.oe_invert = (snap.ext, snap.ext_mask, snap.pull,
+                                                                    snap.oe_invert)
+        self.programs = dict(snap.programs)
+        self.ts_base = snap.ts_base
+        tr = self.trace
+        keep = snap.cycle - tr.start
+        if 0 <= keep <= len(tr):
+            del tr.out[keep:], tr.dir[keep:], tr.inp[keep:], tr.pcs[4 * keep:], tr.stalls[4 * keep:]
+        else:
+            self.trace = Trace(tr.depth)
+            self.trace.start = snap.cycle
+        drop = self.events_total - snap.events_total
+        if drop > 0:
+            del self.events[max(0, len(self.events) - drop):]
+        self.events_total = snap.events_total
+        assert self.cycle == snap.cycle
 
     def pins(self):
         """(out, dir, in) of the 32 lines now."""
@@ -312,11 +390,12 @@ class Session:
             self.lib.pio2sim_run(self.h, n)
         self._drain()
 
-    def step_instr(self, sm, limit=1_000_000):
+    def step_instr(self, sm, limit=1_000_000, on_clock=None):
         """Run until SM `sm` retires one instruction ([SPEC-DBG-03]) and return the clocks run.
         An instruction retires on a clock where the SM's clock enable fires with no delay pending
         and the SM is not stalled afterwards; a stalled instruction keeps running (and does not
-        retire) until it can complete."""
+        retire) until it can complete. `on_clock()` runs after every clock (the bench updates its
+        parts there)."""
         if not (self._get("sm_en") >> sm) & 1:      # VPI: a register read would run clocks
             raise SimError(f"SM{sm} is disabled")
         base = f"gen_sm[{sm}].u_sm."
@@ -324,6 +403,8 @@ class Session:
             fire = self._get(base + "sm_clk_enable") and self._get(base + "delay_cycles") == 0
             pc0 = self._get(base + "pc")
             self.step(1)
+            if on_clock is not None:
+                on_clock()
             if fire and not self._get(base + "stalled"):
                 return k
             if self._get(base + "pc") != pc0:

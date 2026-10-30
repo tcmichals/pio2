@@ -1,0 +1,33 @@
+{
+  "pio2_diagram": 1,
+  "title": "Quadrature encoder on GPIO 10 / 11",
+  "about": "pico-examples quadrature_encoder: the program samples A/B and counts in Y, pushing the count without blocking; an encoder part turns one step every 300 clocks.",
+  "parts": [
+    {
+      "type": "encoder",
+      "name": "Encoder",
+      "pins": {
+        "a": 10,
+        "b": 11
+      },
+      "attrs": {
+        "step_clocks": 300,
+        "direction": 1,
+        "steps": null
+      }
+    }
+  ],
+  "probes": [
+    10,
+    11
+  ],
+  "labels": {
+    "10": "A",
+    "11": "B"
+  },
+  "view": {
+    "speed": 500,
+    "window": 4000
+  },
+  "reference": ""
+}
