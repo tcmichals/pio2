@@ -674,11 +674,22 @@ AXI4-Lite crossbar, like every other block.
 * **Facts**: `dshot_bidir` and `esc_serial` are 27 instructions each; together (54) they do not fit
   one tile's 32-word instruction memory (`[SPEC-PIO-01]`), so a switch on one tile is a reload:
   disable SM, write 27 instruction words (one `REG_WRITE`, at most 28 words), the SM registers, enable.
-* **Requirement**: the reload time (host call to the first edge of the new program on the pin) is
-  measured on the board for: single and dual SPI, the A5E's Linux `spidev` and a Pico host, with and
-  without waiting for each `ACK` (the `seq` numbers allow several requests in flight). The record also
-  states the alternative that needs no reload: both programs resident in two tiles, pin ownership
-  switched by the pin mux (`[SPEC-PIO-09]`), if the Tang Nano 20K fits two tiles (`fpga-fit`).
+* **Host (project owner, 2026-10-31)**: the link master is the A5E's **E906** running AbstractX
+  (bare metal or FreeRTOS, SPI DMA, Dual SPI; AbstractX `[SPEC-ARCH-14]` offload), not Linux
+  `spidev`. The E906 **preloads** both programs: their `REG_WRITE` frames (instruction words, SM
+  registers, disable / enable) are built once with their CRC32 and kept in SRAM, so a switch is one
+  DMA of ready frames, sent back to back without waiting for each `ACK` (`seq` numbers keep them
+  apart; the `ACK`s are read afterwards and any `NAK` is an error).
+* **Estimate (not measured)**: one switch is about 200 bytes of frames (disable, 27 instruction words
+  in one frame of 124 bytes, SM registers, enable). Wire time about 80 us at 10 MHz Dual SPI SCK, about
+  20 us at the 50 MHz target (`[SPEC-LINK-01]`), plus the CS_n gaps and the AXI4-Lite writes inside the
+  FPGA (a few microseconds at 27 MHz). So **tens of microseconds**, well inside one 1 kHz DShot frame.
+  The instruction memory cannot hold the second program while DShot runs (27 of 32 words used).
+* **Requirement**: the reload time (E906 start of DMA to the first edge of the new program on the pin)
+  is measured on the board for single and dual SPI at the SCK the board runs, with preloaded frames
+  and no `ACK` wait, and once with an `ACK` wait per frame for comparison. The record also states the
+  alternative that needs no reload: both programs resident in two tiles, pin ownership switched by the
+  pin mux (`[SPEC-PIO-09]`), if the Tang Nano 20K fits two tiles (`fpga-fit`).
 * **Requirement**: the acceptable switch time is stated here once the use is decided (open: entering
   4-way passthrough with motors disarmed tolerates milliseconds; a switch inside a 1 kHz DShot loop
   does not).

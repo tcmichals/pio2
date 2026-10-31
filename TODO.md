@@ -63,14 +63,13 @@ To do, in order:
 9. **Full cycle against RP2040 silicon** `[SPEC-VER-04]`: Pico test firmware that loads the same
    program words + config and replays stimulus; compare Pico / Verilator / Tang / Zynq pin traces at SM
    clock resolution; every difference becomes a failing cocotb test first.
-10. **Reload time DShot <-> ESC serial on Tang Nano 20K + A5E** `[SPEC-VER-05]`: both programs are 27
-   instructions (54 > 32 words), so switching on one tile is a reload: about 4 `REG_WRITE` frames + ACKs.
-   Estimate (not measured): wire time ~13 us per 128-byte frame at 10 MB/s Dual SPI, ~50 us at 10 MHz
-   SCK; on A5E Linux spidev the per-transfer overhead (tens to ~100+ us each, typical, not measured on
-   the A5E) dominates, so roughly 0.2-1 ms per switch, less if requests are pipelined by `seq`.
-   Alternative with no reload: two tiles, one program each, switch the pin in the mux (check the 20K
-   fits two tiles, `fpga-fit`). Decide the required switch time (4-way passthrough entry with motors
-   disarmed vs a switch inside the DShot loop), then measure on the board.
+10. **Reload time DShot <-> ESC serial on Tang Nano 20K + A5E E906** `[SPEC-VER-05]`: both programs are
+   27 instructions (54 > 32 words), so switching on one tile is a reload. Host is the E906 (AbstractX
+   offload, SPI DMA, Dual SPI), not Linux spidev: preload both programs' REG_WRITE frames (CRC done) in
+   SRAM, DMA them back to back, check ACKs after. Estimate (not measured): ~200 bytes, ~80 us at 10 MHz
+   Dual SPI, ~20 us at 50 MHz, so tens of microseconds. Next: E906 side of the preload in AbstractX,
+   then measure on the board (pin edge vs DMA start). Alternative with no reload: two tiles, pin mux
+   switch (check the 20K fits two tiles, `fpga-fit`). Required switch time still to be stated.
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
