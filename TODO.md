@@ -49,13 +49,28 @@ To do, in order:
    clean tree and commit the ledger; SpecTrace `--check-drift/--check-skills/--check-verifies`.
 6. **Merge the debugger branch** `worktree-agent-aa5ce2bdeac89fae2` (hand-merge `session.py`,
    `pio2sim.cpp`; 99d587f untested), then the SPI link RTL review (below).
-7. **Survey of other PIO simulators** (never done: `docs/DEBUGGER_SPECIFICATION.md` §2 lists only
-   Wokwi, rp2040pio, rp2040-pio-emulator, unchecked). (a) Web survey of current PIO simulators,
-   emulators and debuggers (RP2040 and RP2350 PIO v1), with maintenance state and license; (b) feature
-   table against pio2 in §2 (cycle accuracy, delay / side-set, fractional clock divider, multi-SM, IRQ,
-   FIFO join, GPIO / stimulus, GUI, scripting, reverse step); links go in `docs/references.md`
-   (linked, never copied); (c) choose the reference emulator for diff mode `[SPEC-DBG-08]` (M6) and
-   record the choice under Decisions.
+7. **Diff-mode reference emulator** `[SPEC-DBG-08]`: survey done 2026-10-31 (table in
+   `docs/DEBUGGER_SPECIFICATION.md` §2, links in `docs/references.md`; READMEs only, no tool run).
+   Decide: headblockhead/pio (Go, AGPL-3.0, proposed) or picoem (Rust); run the candidate on the
+   conformance set before choosing; record under Decisions.
+8. **Automated hardware testing** `[SPEC-VER-03]`: runner in `tools/hil/` that builds, loads (Tang:
+   openFPGALoader to SRAM; QMTech Zynq: SSH + FPGA Manager + overlay, as AbstractX
+   `hw/zynq7000/qmtech_zynq7020/tools/load_bitstream.py`; Pico: picotool), checks ID / VERSION /
+   hash, runs the per-board list, captures pins (second Pico as PIO sampler, or sigrok), writes JSON
+   evidence + pio2-trac records, NOT RUN for a missing board. Blocked on: pin mux `[SPEC-PIO-09]`
+   (the tile cannot drive a pin yet, docs/boards.md), pio2 Tang / Zynq tops (still in AbstractX), SPI
+   link RTL (untested). Decide the rig: which capture, which host for the Tang (A5E or Pico).
+9. **Full cycle against RP2040 silicon** `[SPEC-VER-04]`: Pico test firmware that loads the same
+   program words + config and replays stimulus; compare Pico / Verilator / Tang / Zynq pin traces at SM
+   clock resolution; every difference becomes a failing cocotb test first.
+10. **Reload time DShot <-> ESC serial on Tang Nano 20K + A5E** `[SPEC-VER-05]`: both programs are 27
+   instructions (54 > 32 words), so switching on one tile is a reload: about 4 `REG_WRITE` frames + ACKs.
+   Estimate (not measured): wire time ~13 us per 128-byte frame at 10 MB/s Dual SPI, ~50 us at 10 MHz
+   SCK; on A5E Linux spidev the per-transfer overhead (tens to ~100+ us each, typical, not measured on
+   the A5E) dominates, so roughly 0.2-1 ms per switch, less if requests are pipelined by `seq`.
+   Alternative with no reload: two tiles, one program each, switch the pin in the mux (check the 20K
+   fits two tiles, `fpga-fit`). Decide the required switch time (4-way passthrough entry with motors
+   disarmed vs a switch inside the DShot loop), then measure on the board.
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 

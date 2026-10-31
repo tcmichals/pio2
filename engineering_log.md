@@ -336,3 +336,17 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   (Verilator 5.049, oss-cad-suite).
 * **Not verified**: why the 2026-10-30 handoff recorded 11/11 on the same binary; full Verilator and
   Icarus runs with the fix.
+
+## 2026-10-31: pio2 commit made inside AbstractX's rtl/pio checkout, never pushed; AbstractX pinned it
+
+* **Category**: `process-gap`
+* **What**: e856f24 (Zynq adapter = own ring DMA, [SPEC-ICN-11], docs only) was committed in
+  `AbstractX/rtl/pio` and AbstractX 9c902a4 pinned the submodule to it; it was never pushed, so a clean
+  AbstractX clone failed `git submodule update` ("not our ref"). Recovered by fetching it from the
+  AbstractX checkout into pio2, pushing branch `zynq-ring-dma`, merging into main (a3859f2).
+* **Rule**: before AbstractX commits a new `rtl/pio` pin, the pinned SHA must be on
+  `origin` (`git -C rtl/pio branch -r --contains <sha>` non-empty); pio2 work is committed in the pio2
+  repo, not in the submodule checkout.
+* **Evidence**: `git ls-remote origin zynq-ring-dma` = e856f246...; `git merge-base --is-ancestor
+  e856f24 main` = yes after the merge.
+* **Not verified**: a clean AbstractX clone + `git submodule update --init rtl/pio` after the push.

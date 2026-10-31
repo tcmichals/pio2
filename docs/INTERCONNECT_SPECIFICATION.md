@@ -623,3 +623,64 @@ AXI4-Lite crossbar, like every other block.
   Nano 9K and 20K recorded per change.
 * **Verified by**: `formal-check`, `cocotb-regression`, `fpga-fit`
 * **Implementation Target**: `tests/formal/`, `tests/cocotb/`, `tests/uvm/`
+
+### `[SPEC-VER-03]` Automated Hardware Testing: Build, Load, Run, Record (Hardware in the Loop)
+* **Goal (project owner, 2026-10-31)**: full automated hardware testing, as AbstractX has
+  (AbstractX `[SPEC-ZYNQ-PLATFORM-11]` runtime bitstream loading, `e906-board-selftest`): one command
+  takes a commit to results from real boards, with no manual step.
+* **Requirement (boards)**: the rig has a Tang Nano 20K and a Tang Nano 9K (SPI link, `[SPEC-LINK-*]`,
+  host an A5E or a Pico), a QMTech Zynq-7020 (native AXI, `[SPEC-ICN-11]`) and a Raspberry Pi Pico
+  (RP2040 silicon, `[SPEC-VER-04]`). Each board is optional per run; a missing board is reported as
+  **not run**, never as passed.
+* **Requirement (load)**: the runner builds and loads without a person: Tang boards by
+  `openFPGALoader` to SRAM (flash only on request); the Zynq by SSH into its PS-only image, Linux FPGA
+  Manager and the matching device-tree overlay (as AbstractX `load_bitstream.py`), unloading the
+  previous overlay first; the Pico by `picotool` (or SWD through a debug probe). After loading it
+  checks identity: core `ID` = `0x50494F32` and `VERSION` over the link or UIO, the bitstream hash and
+  the commit it was built from.
+* **Requirement (run)**: per board the same test list: register access in every window, every
+  program in `src/programs/` (conformance set, DShot / bidirectional DShot, ESC serial) with its
+  stimulus, streams on every channel, interrupt, trace with drop accounting (`[SPEC-TRC-01]`), and the
+  program-reload timing of `[SPEC-VER-05]`. Pins are observed by a logic capture (a second Pico running
+  a PIO sampler, or a logic analyzer with sigrok), not by the device under test reporting on itself.
+* **Requirement (record)**: each run writes a JSON record (board, bitstream hash, commit, tool
+  versions, per-test PASS / FAIL / NOT RUN, measured numbers) under `docs/verification/evidence/` and
+  into the `pio2-trac` ledger (`[SPEC-VER-02]`); a failure gets an `engineering_log.md` entry.
+* **Requirement (safety)**: motor outputs drive ESC simulators or a load board, never props; the
+  runner refuses to enable a motor pin unless the rig config names it as safe.
+* **Verified by**: `board-bringup` (a full run on every board in the rig), `host-tests` (the runner's
+  board selection, NOT RUN reporting and record format, against a fake board)
+* **Implementation Target**: `tools/hil/` (runner, loaders, capture), `tests/board/`
+
+### `[SPEC-VER-04]` Cross-Check Against RP2040 Silicon (the Full Cycle)
+* **Goal (project owner, 2026-10-31)**: test against a real Pico and close the full cycle: the same
+  PIO program and stimulus on RP2040 silicon, on pio2 in simulation (Verilator, `[SPEC-DBG-*]`), on
+  pio2 in a Tang and on pio2 in the Zynq, compared with each other.
+* **Requirement**: the Pico runs a fixed test firmware that loads a program image (the same
+  `src/programs/*.json` words), sets the same SM configuration (divider, pins, shift, side-set) and
+  applies stimulus on its input pins from a recorded vector; the capture records the output pins.
+* **Requirement (compare)**: pin traces from all four are aligned on the first edge and compared at SM
+  clock resolution (divider applied); the first difference is reported with cycle, pin and the
+  instruction executing (from the simulation). Where an independent emulator is in use
+  (`[SPEC-DBG-08]`) it is a fifth column.
+* **Requirement**: every difference found against silicon becomes a cocotb test that fails on the old
+  RTL before the fix (AGENTS.md rule 4).
+* **Verified by**: `board-bringup`
+* **Implementation Target**: `tools/hil/pico_ref/` (Pico firmware), `tools/hil/compare.py`
+
+### `[SPEC-VER-05]` Program Reload Time over the Link (DShot <-> ESC Serial)
+* **Goal (project owner, 2026-10-31)**: know whether a Tang Nano 20K driven by the A5E over SPI can
+  switch a motor pin between `dshot_bidir` and `esc_serial` fast enough.
+* **Facts**: `dshot_bidir` and `esc_serial` are 27 instructions each; together (54) they do not fit
+  one tile's 32-word instruction memory (`[SPEC-PIO-01]`), so a switch on one tile is a reload:
+  disable SM, write 27 instruction words (one `REG_WRITE`, at most 28 words), the SM registers, enable.
+* **Requirement**: the reload time (host call to the first edge of the new program on the pin) is
+  measured on the board for: single and dual SPI, the A5E's Linux `spidev` and a Pico host, with and
+  without waiting for each `ACK` (the `seq` numbers allow several requests in flight). The record also
+  states the alternative that needs no reload: both programs resident in two tiles, pin ownership
+  switched by the pin mux (`[SPEC-PIO-09]`), if the Tang Nano 20K fits two tiles (`fpga-fit`).
+* **Requirement**: the acceptable switch time is stated here once the use is decided (open: entering
+  4-way passthrough with motors disarmed tolerates milliseconds; a switch inside a 1 kHz DShot loop
+  does not).
+* **Verified by**: `board-bringup`, `fpga-fit` (two tiles on the Tang Nano 20K)
+* **Implementation Target**: `src/pio2/host/`, `tools/hil/`

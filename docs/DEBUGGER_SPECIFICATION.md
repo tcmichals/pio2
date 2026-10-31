@@ -1,6 +1,6 @@
 # pio2 Visual Debugger: Design
 
-Status: design, nothing implemented yet (2026-10-29). Requirements carry `[SPEC-DBG-*]` tags; code
+Status (2026-10-31): M1 and M2 done (see the milestone table); M3-M7 specified, not built. Requirements carry `[SPEC-DBG-*]` tags; code
 that implements one carries `@impl [SPEC-DBG-nn] docs/DEBUGGER_SPECIFICATION.md`.
 
 ## 1. Goal
@@ -11,13 +11,33 @@ breakpoints, a logic analyzer, stimulus on the input pins, and the ability to st
 
 ## 2. What exists, and what this does differently
 
-Prior art (links in [references.md](references.md); check current state before relying on this):
+Prior art: survey of 2026-10-31 (links and licenses in [references.md](references.md)). Facts come
+from READMEs, the GitHub API and a source skim; **no tool was run**. Y / N confirmed, `?` unknown,
+`pl` planned in pio2.
 
-| Tool | Model | What it is |
-| :--- | :--- | :--- |
-| Wokwi | software model of the RP2040, in the browser | full-chip simulation incl. PIO, logic analyzer |
-| rp2040pio (soundpaint) | Java software emulator | PIO emulator with a GUI and register views |
-| rp2040-pio-emulator (NathanY3G) | Python software emulator | library for testing PIO programs |
+| Tool | Language, license, last activity | RP2040 / RP2350 | Cycle exact | Frac. divider | Multi-SM | IRQ | FIFO join | GUI | Script API | Reverse |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **pio2** | SystemVerilog RTL + Verilator, GPL-3.0+, 2026-10 | Y / N | Y (it is the RTL) | Y | Y | Y | Y | Y (M2) | Y Python (M1) | pl (M4) |
+| Wokwi / rp2040js | TypeScript, MIT (Wokwi closed), 2026-10 | Y / partial | **N** (delays counted, divider not applied) | N | Y | Y | N | Y | JS | ? |
+| rp2040pio (soundpaint) | Java, GPL-2.0, 2021-12 | Y / N | ? | ? | Y | ? | Y | Y | socket | ? |
+| rp2040-pio-emulator (NathanY3G) | Python, Apache-2.0, 2026-08 | Y / Y | counts cycles | ? | **N** (1 SM) | **N** | ? | N | Y Python | N |
+| headblockhead/pio | Go, AGPL-3.0, 2026-10 | Y / N | Y (claimed) | Y | Y | Y | Y | N (TUI) | Go | N |
+| picoem | Rust, Apache-2.0 / MIT, 2026-06 | Y / Y (full chip) | Y (claimed) | Y | Y | Y | ? | TUI | Rust | N |
+| epio | C, MIT, 2026-10 | ? / Y | Y (claimed) | N | Y | Y | N | WASM demo | C, JS | N |
+| pioemu (wang-edward) | Rust, MIT, 2026-09 | Y / Y | per tick | ? | Y | Y | Y | N | Rust | N |
+| pio_sim (ice458) | JS in the browser, MIT, 2026-09 | Y / Y | ? | ? | ? | Y | ? | Y | N | ? |
+| pioweave | Python + Amaranth, MIT, 2026-10 (early) | Y / Y | Y | design time | Y | Y | Y | N | Python | N |
+
+Also: single-SM C emulators (sumio-morioka, esky-software, GPL-3.0), a Renode RP2040 PIO model
+(matgla, MIT), HDL reimplementations (lawrie/fpga_pio, BSD-2-Clause, incomplete;
+jgpeiro/axi_pio_cocotb, AXI4-Lite + cocotb like pio2, **no license: do not reuse**), and VisualGDB's
+commercial PIO debugger, which steps a real chip. No PIO model found in upstream Renode, QEMU or MAME.
+
+Diff-mode reference (`[SPEC-DBG-08]`), proposal, not decided: **headblockhead/pio** first (the only
+maintained one claiming cycle exactness with the divider, side-set, FIFO join, IRQ and input
+synchronisers; AGPL-3.0 run as a separate process; risks: one author, Go toolchain), **picoem** second
+(RP2040 and RP2350, diff-tested against epio and hardware; needs a wrapper, maintenance disclaimed).
+pioemu's randomized tests against a real RP2040 are the model for `[SPEC-VER-04]`.
 
 All of them run a **software model** of the PIO. pio2 has a hardware implementation, so the
 debugger runs the RTL itself (Verilator), which gives what a software emulator cannot:
