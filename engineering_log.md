@@ -398,3 +398,25 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   1930 events where > 2000 expected; not diagnosed, possibly TODO item 1).
 * **Not verified**: none of the new text is implemented (`src/pio2/host/msp_passthrough.py`, the
   pad-owner mux); nothing run on hardware.
+
+## 2026-10-31: The PIO tile does not fit the Tang Nano 9K or 20K; no Fmax yet
+
+* **Category**: `product-bug` (area), `process-gap` (synthesis-only check), `tool-bug` (Vivado on Ubuntu 26.04)
+* **What**: AbstractX `main` (c43d37f, rtl/pio at e856f24) built from a scratch clone with oss-cad-suite
+  (Yosys `synth_gowin`, nextpnr-himbaechel). Tang Nano 9K (`make -f hw/Makefile build_hw/tang9k_pnr.json`):
+  LUT4 22609 / 8640 (261 %), DFF 9170 / 6480 (141 %), placement fails. Tang Nano 20K
+  (`tang_nano20k_fit`): LUT4 22970 / 20736 (110 %), DFF 9214 / 15552 (59 %), "Unable to find legal
+  placement". The plain `tang_nano20k` target stops earlier on an unconstrained `spi_sclk` IO.
+* **Cause (located, not fixed)**: the tile alone (pio2 `main`, `asp_pio_sm.sv` + `asp_pio_tile.sv`,
+  `synth_gowin` flattened): LUT1 4410, LUT2 3708, LUT3 7407, LUT4 13711, MUX2_LUT5..8 13348, ALU 1195,
+  DFF ~3440, RAM16SDP4 40. With `-noflatten` each `asp_pio_sm` is ~5600 - 6000 LUTs. Which construct
+  costs it is not yet known (suspects: the single always_ff with blocking locals duplicating the
+  shifters / rotators per instruction path, the 8-word FIFO kept in flip-flops).
+* **Process gap**: the 2026-10-29 note "Tang Nano 20K synthesis ok" was synthesis only; place and route
+  was never run, so the overflow went unseen. `fpga-fit` must run place and route, not only Yosys.
+* **Tool fact**: Vivado 2025.2 (`~/hdisk/tools/AMD/2025.2`) hangs at start on Ubuntu 26.04
+  (`libncurses.so.5` missing). Works with a private dir of symlinks `libncurses.so.5 ->
+  /usr/lib/x86_64-linux-gnu/libncurses.so.6`, `libtinfo.so.5 -> libtinfo.so.6` on `LD_LIBRARY_PATH`.
+  The Zynq-7020 out-of-context run of `pio2_core` (`xc7z020clg400-2`, 4 ns) was stopped during
+  synthesis for low memory (~10 GB RAM, ~150 MB free); no Zynq result.
+* **Not verified**: Fmax on any board; the per-construct cost inside `asp_pio_sm`.

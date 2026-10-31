@@ -244,6 +244,17 @@ Next steps, in order:
 7. [ ] Evidence ledger for pio2 (trac.py records) so the matrix can show VERIFIED
 8. [ ] Wiki / tutorials and demos (how the PIO works, debugger walkthroughs) once the debugger runs
 
+## Blocker: the tile does not fit the Tang boards (found 2026-10-31)
+
+AbstractX top needs 261 % of the 9K's LUTs and 110 % of the 20K's; the tile alone is ~29k LUT
+(flattened `synth_gowin`), ~6k per SM. No Tang Fmax until it fits. Details: engineering_log.md.
+1. Find what costs the area in `asp_pio_sm.sv` (Yosys `stat` per construct; try one rotator per
+   direction shared by IN / OUT / MOV, FIFO in RAM16SDP4 instead of flip-flops), with the ISA suite
+   (384 cases) as the guard; target well under 2k LUT per SM.
+2. Make `fpga-fit` run place and route (not synthesis only) on 9K and 20K, record LUT / DFF / Fmax.
+3. Zynq Fmax: Vivado OOC of `pio2_core` on `xc7z020clg400-2` (script in the log entry) when the PC has
+   memory free (stopped once for low memory); needs the `libncurses.so.5` shim.
+
 ## Best PIO by far (proposed 2026-10-31, project owner; spec only, nothing built)
 
 Ranked. Each item: failing test first, then RTL / code, then the skill in its `Verified by`.
