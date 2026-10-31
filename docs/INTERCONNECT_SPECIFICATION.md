@@ -685,6 +685,10 @@ AXI4-Lite crossbar, like every other block.
   20 us at the 50 MHz target (`[SPEC-LINK-01]`), plus the CS_n gaps and the AXI4-Lite writes inside the
   FPGA (a few microseconds at 27 MHz). So **tens of microseconds**, well inside one 1 kHz DShot frame.
   The instruction memory cannot hold the second program while DShot runs (27 of 32 words used).
+* **With the tile preload (`[SPEC-PIO-16]`, proposed)**: the next program and its SM configuration are
+  written into the staging bank ahead of time, while the current program runs; the switch is one
+  `REG_WRITE` of one word (`PRELOAD_SWAP`, a ~20-byte frame: a few microseconds on the wire) and the
+  tile swaps in one clock. Swapping back needs no reload. Measured the same way as below.
 * **Requirement**: the reload time (E906 start of DMA to the first edge of the new program on the pin)
   is measured on the board for single and dual SPI at the SCK the board runs, with preloaded frames
   and no `ACK` wait, and once with an `ACK` wait per frame for comparison. The record also states the

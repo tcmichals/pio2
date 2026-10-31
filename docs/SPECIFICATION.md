@@ -224,6 +224,42 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 * **Verified by**: `cocotb-regression` (tests load the checked-in images), the `--check` tool
 * **Implementation Target**: `src/programs/`, `src/pio2/programs.py`
 
+### `[SPEC-PIO-16]` Program Preload: Staging Bank and One-Write Swap (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: switch a tile between two programs (e.g. `dshot_bidir` and
+  `esc_serial`, 27 words each, `[SPEC-VER-05]`) without reloading over the link at switch time: the
+  next program is preloaded into the tile while the current one runs, and the switch is one register
+  write. **Status: proposed, not implemented.**
+* **Requirement (staging bank)**: the tile has two instruction banks of 32 x 16 bits. One is
+  **active** (the SMs fetch from it); the other is **staging**. `0x10 .. 0x8C` read and write the
+  active bank exactly as today (RP2040-compatible); `0x200 .. 0x27C` read and write the staging bank.
+  Writing the staging bank never changes what a running SM executes.
+* **Requirement (staging SM configuration)**: per SM `N`, at `0x280 + 0x20 * N`: staging `CLKDIV`,
+  `EXECCTRL`, `SHIFTCTRL`, `PINCTRL` (same layouts as `0x100 .. 0x10C + 0x20 * N`), `START_PC[4:0]`,
+  and `INIT_INSTR` (one instruction run at the swap before the SM starts, e.g. `set pindirs`, as
+  `pio_sm_exec` does); and `0x2F0`: staging `ENABLE[3:0]`.
+* **Requirement (swap)**: a write of `0xA5` to `PRELOAD_SWAP` (`0x2F4`) does, in one clock for all four
+  SMs (the instruction memory is shared, so the whole tile swaps): disable every SM; exchange active
+  and staging banks; copy each SM's staging configuration into its live registers; restart each SM
+  (ISR / OSR / counters cleared, divider phase reset, both FIFOs cleared, as `RESTART` plus a FIFO
+  clear); set PC to `START_PC`; run `INIT_INSTR`; then set `ENABLE` from staging `ENABLE[3:0]`. The
+  first instruction of the new program executes within a stated, fixed number of clocks after the
+  write (the test measures it). Any other value written does nothing.
+* **Requirement (pins)**: pin output values and directions are held through the swap until the new
+  program (or `INIT_INSTR`) changes them; no glitch on a motor pin.
+* **Requirement (status)**: `0x2F8` reads `ACTIVE_BANK[0]` and a swap counter, so the host can confirm
+  the swap and keep a staging copy of the program it left (swap back is a second `0xA5`, no reload).
+* **Requirement (compatibility)**: a tile whose host never touches `0x200 .. 0x2FC` behaves exactly as
+  the RP2040 PIO (`[SPEC-PIO-02]`, `[SPEC-PIO-15]`); the extension is listed in the parity checklist
+  as pio2-only. The disarmed rule of `[SPEC-PIO-11]` still applies to a swap on a tile that drives
+  actuators.
+* **Requirement (cost)**: the second bank and the staging registers are measured on the Tang Nano 9K
+  and 20K (`fpga-fit`); a build parameter `PRELOAD = 0` removes them.
+* **Verified by**: `cocotb-regression` (staging writes while `dshot_bidir` runs leave its waveform
+  unchanged; swap `dshot_bidir` -> `esc_serial` -> back, first new instruction within the stated
+  clocks, pins held, FIFOs cleared; a wrong key does nothing; `PRELOAD = 0` reads 0 there),
+  `rtl-lint`, `fpga-fit`
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`, `src/pio2/host/`
+
 ### `[SPEC-PIO-12]` Motor Outputs: Bidirectional DShot600 as a PIO Program
 * **Requirement**: 4 motor outputs, one state machine each, on one tile running one shared
   program (`src/programs/dshot_bidir.pio`, 27 of 32 words). 16 SM cycles per DShot bit; the

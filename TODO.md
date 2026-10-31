@@ -70,6 +70,11 @@ To do, in order:
    Dual SPI, ~20 us at 50 MHz, so tens of microseconds. Next: E906 side of the preload in AbstractX,
    then measure on the board (pin edge vs DMA start). Alternative with no reload: two tiles, pin mux
    switch (check the 20K fits two tiles, `fpga-fit`). Required switch time still to be stated.
+11. **Tile program preload** `[SPEC-PIO-16]` (proposed 2026-10-31, project owner likes it): staging
+   instruction bank + staging SM config + `PRELOAD_SWAP` one-write swap in one clock. Review the spec
+   (register offsets 0x200..0x2FC, key 0xA5, whole-tile swap), then RTL in `asp_pio_tile.sv` with a
+   failing cocotb test first, `fpga-fit` cost on 9K / 20K, host API in `src/pio2/host/`, E906 side in
+   AbstractX. Makes item 10 a one-word write.
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
