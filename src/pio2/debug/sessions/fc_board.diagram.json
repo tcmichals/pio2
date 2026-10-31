@@ -1,0 +1,84 @@
+{
+  "pio2_diagram": 1,
+  "title": "Flight controller board: IMU auto-DMA + LEDs + console",
+  "about": "Four programs in one tile (29 of 32 words). SM0 imu_spi_burst: DRDY starts a 12-byte SPI burst and a DRDY-triggered DMA channel moves each sample into a ring with no host work per sample; the host only collects batches. SM1 WS2812 strip, SM2 UART console, SM3 status LED.",
+  "parts": [
+    {
+      "type": "imu",
+      "name": "IMU",
+      "pins": {
+        "mosi": 16,
+        "sck": 17,
+        "cs": 18,
+        "miso": 19,
+        "drdy": 20
+      },
+      "attrs": {
+        "who_am_i_reg": 117,
+        "who_am_i": 71,
+        "data_reg": 31,
+        "odr_clocks": 15625,
+        "drdy_clocks": null,
+        "latency": 4,
+        "idle_horizon": 64,
+        "regs": {}
+      }
+    },
+    {
+      "type": "ws2812",
+      "name": "Strip",
+      "pins": {
+        "pin": 2
+      },
+      "attrs": {
+        "n_leds": 8,
+        "bit_clocks": 156.25,
+        "reset_clocks": 6250,
+        "threshold": 0.45
+      }
+    },
+    {
+      "type": "terminal",
+      "name": "Console",
+      "pins": {
+        "rx": 0
+      },
+      "attrs": {
+        "clocks_per_bit": 16
+      }
+    },
+    {
+      "type": "led",
+      "name": "Status",
+      "pins": {
+        "pin": 25
+      },
+      "attrs": {}
+    }
+  ],
+  "probes": [
+    20,
+    18,
+    17,
+    16,
+    19,
+    2,
+    0,
+    25
+  ],
+  "labels": {
+    "16": "MOSI",
+    "17": "SCK",
+    "18": "CSn",
+    "19": "MISO",
+    "20": "DRDY",
+    "2": "DIN",
+    "0": "TX",
+    "25": "LED"
+  },
+  "view": {
+    "speed": 2000,
+    "window": 40000
+  },
+  "reference": ""
+}

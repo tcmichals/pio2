@@ -140,10 +140,12 @@ class Bench:
         self.last_stop = None
         self.horizon = 0                   # furthest cycle of the current timeline
         self.origin = self.s.cycle
+        self.s.set_access_hook(self._during_access)
         if example is not None:
             self.load(example)
 
     def close(self):
+        self.s.set_access_hook(None)
         if self.own:
             self.s.close()
 
@@ -283,6 +285,19 @@ class Bench:
             return r
         else:
             raise ValueError(a.kind)
+
+    def _during_access(self):
+        """After each clock of a register access (a few clocks): drive changes that came due are applied
+        and responsive device models (SPI / I2C slaves, the ESC) look at the lines, so they keep
+        answering while a host script's access runs. Host scripts are not called here (they make
+        register accesses themselves); passive parts catch up after the access."""
+        c = self.s.cycle
+        todo = [p for p in self.parts if not p.host
+                and (p.responsive or (p.schedule and p.schedule[0][0] <= c))]
+        if todo:
+            self.s._drain()
+            for p in todo:
+                p.update(self.s)
 
     def _update_parts(self):
         for p in self.parts:

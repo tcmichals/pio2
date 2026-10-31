@@ -144,3 +144,23 @@ def test_every_example_runs_headless(s, name):
     b, ex = load(s, name)
     b.run(5000)
     assert s.cycle >= 5000
+
+
+def test_program_loaded_at_an_offset_is_relocated(s):
+    """pio_add_program adds the load offset to every JMP target; blink at offset 21 (as in a tile
+    shared with other programs) keeps blinking with the same period as at offset 0."""
+    def half_periods(offset):
+        s.reset()
+        s.load("blink", sm=0, offset=offset, pinctrl=Pins(set_base=25, set_count=1), enable=False)
+        s.set_pindirs(0, 1 << 25, 1 << 25)
+        s.enable(0)
+        s.push(0, 50)
+        s.step(2000)
+        tr = s.trace
+        lv = [(tr.out[i] >> 25) & 1 for i in range(len(tr))]
+        edges = [i for i in range(1, len(lv)) if lv[i] != lv[i - 1]]
+        return [b - a for a, b in zip(edges, edges[1:])][2:6]
+
+    at0, at21 = half_periods(0), half_periods(21)
+    assert at0 and at0 == at21, (at0, at21)
+    assert all(21 <= s.sm_state(0)["pc"] < 21 + 8 for _ in range(1))

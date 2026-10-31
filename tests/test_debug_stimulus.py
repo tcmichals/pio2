@@ -84,6 +84,7 @@ def test_spi_imu_samples_match_the_imu(b):
     assert len(host.samples) >= 5
     for s in host.samples:
         assert s in imu.values
+    assert imu.late == 0, f"{imu.late} MISO changes came too late"
 
 
 def test_i2c_reads_the_sensor_value(b):
@@ -109,6 +110,38 @@ def test_ws2812_strip_shows_the_last_frame_sent(b):
         return (w >> 16 & 255, w >> 24 & 255, w >> 8 & 255)
 
     assert strip.colors == [rgb(rainbow_word(8 * f + j)) for j in range(8)]
+
+
+# ---------------------------------------------------------------------------- several programs at once
+def test_fc_board_imu_auto_dma_is_exact_while_three_other_programs_run(b):
+    """Four programs in one tile (29 of 32 words, at offsets 0 / 13 / 17 / 21). The DRDY-triggered DMA
+    ring holds exactly the IMU's samples, in order, none lost or extra, and the host made no
+    register access for them ([SPEC-PIO-06]); the strip, console and status LED run alongside.
+    Before the fixes: a junk first burst (DRDY floating high before the IMU ran) and bit errors
+    (the IMU model froze during the other host scripts' register accesses: 414 late MISO changes)."""
+    b.load("FC board (IMU auto-DMA)")
+    b.run(400_000)
+    imu, ring = of_kind(b, "imu"), b.part("imu_ring")
+    assert [b.s.sm_state(sm)["enabled"] for sm in range(4)] == [True] * 4
+    n = len(ring.samples)
+    assert n >= 20 and ring.samples == imu.values[:n]
+    assert imu.late == 0 and ring.register_accesses == 0
+    assert of_kind(b, "ws2812").frames >= 3
+    assert of_kind(b, "terminal").text.startswith("pio2 fc: imu ok, leds ok\r\n")
+    assert of_kind(b, "led").toggles >= 4
+
+
+def test_four_motors_share_one_program_and_each_follows_its_throttle(b):
+    b.load("Four motors")
+    b.run(800_000)
+    rpms = []
+    for i, throttle in enumerate((300, 800, 1200, 1800)):
+        esc, fc = b.part(f"ESC{i + 1}"), b.part(f"fc{i + 1}")
+        assert esc.throttle == throttle and esc.bad_crc == 0 and esc.frames >= 35
+        assert None not in fc.replies
+        assert fc.rpm == pytest.approx(esc.telemetry_rpm, rel=0.01)
+        rpms.append(fc.rpm)
+    assert rpms == sorted(rpms) and rpms[0] > 0
 
 
 # ---------------------------------------------------------------------------- watches

@@ -530,3 +530,39 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   1 failed (known `test_trace_ctf`); SpecTrace drift 0, verifies 2 (pre-existing).
 * **Not verified**: keyboard use; window docking / resizing by hand; the GUI on X11 or another
   desktop; there is still no GUI control for Back (reverse step) or breakpoints.
+
+## 2026-10-31: Several programs at once: Four motors, FC board (IMU auto-DMA); four fixes
+
+* **Category**: `product-bug` (3), `tool-bug` (2), `hardware-fact`
+* **What**: two examples that run all four SMs. "Four motors": one `dshot_bidir` copy (27 words) shared
+  by SM0..3 on GPIO 4..7, four ESC models, throttles 300 / 800 / 1200 / 1800; each host's decoded RPM
+  equals its ESC's telemetry, 0 bad CRC. "FC board (IMU auto-DMA)": four programs in one tile at
+  offsets 0 / 13 / 17 / 21 (29 of 32 words): `imu_spi_burst` with a DRDY-triggered DMA channel into a
+  ring ([SPEC-PIO-06]; `RingReader` collects batches from the link and makes no register access),
+  WS2812, UART console, status LED. The ring holds exactly the IMU's samples in order.
+* **Bugs found and fixed** (each with a test that fails when reverted):
+  1. `Session.load` wrote program words unchanged at any offset; pioasm JMP targets are relative to
+     the program, and `pio_add_program` adds the offset. Every example had used offset 0.
+  2. Device models froze during host register accesses (several clocks each, atomic in the C model):
+     with three host scripts polling, the SPI IMU changed MISO up to 40 clocks late (414 `late`) and
+     the ring got bit errors. The C model now calls back after every clock of an access
+     (`pio2sim_set_access_hook`); `Bench` applies due drive changes and updates `responsive` parts
+     (SPI IMU, I2C slaves, ESC). A first version updated every part every access clock and halved
+     UART TX speed (188k -> 95k clocks/s); the selective one is back to 179k.
+  3. FC board: DRDY floated high (board pull-up) before the IMU model attached, so SM0 ran a junk
+     burst first; the board now has pull-downs on DRDY and MISO.
+  4. Trace window labelled DMA records "SM2"; their `src` is the DMA channel ("DMA2").
+* **Tried and removed**: polling the IMU fast while DRDY is high; no test needed it once (2) was in.
+* **Tool facts**: a window that is not on screen is throttled by the compositor (1 frame per second,
+  later ~0.1), so the GUI drive ran into the test engine's 60 s and 600 s watchdogs. `tests/test_gui.py`
+  now runs on hello_imgui's null backends (no window, ~10-25 s, no display needed; ImGui builds the font
+  atlas when the backend flag `renderer_has_textures` is set). The null backend then trips a shutdown-
+  order assert (test engine destroyed before the ImGui context) after the test has finished; the test
+  ignores exactly that assert, only when the drive reached its end. `PIO2_GUI_SHOTS=<dir>` uses the
+  real window for screenshots.
+* **Process gap (test)**: the stale-message check passed with the bug back in (an earlier Run click
+  cleared it); the test now sets the message and changes example directly.
+* **Evidence**: `pytest tests` 556 passed, 1 failed (known `test_trace_ctf`); all 15 examples through
+  `pio2-debug`; screenshots of both new examples reviewed; SpecTrace drift 0, skills 0, verifies 2.
+* **Not verified**: the FC board on hardware; DMA ring overflow behaviour in the GUI; parts do not
+  show their state yet (strip colours, ESC RPM).

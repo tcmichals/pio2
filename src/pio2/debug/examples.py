@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pio2.debug import diagram
 from pio2.debug.session import Pins
 from pio2.debug.stimulus import (DShotHost, EscSerialHost, FifoFeeder, I2cHost, ImuHost, QuadratureHost,
-                                 RxCollector, UartRxHost)
+                                 RingReader, RxCollector, UartRxHost)
+from pio2.regs import DMA_CH, DMA_COUNT, DMA_FLUSH, DMA_THR, OUT, TRIGGERED, dma_cfg
 
 F_SYS = 125e6
 
@@ -128,14 +129,14 @@ def rainbow_word(i, n=8):
     return (g << 24) | (r << 16) | (b << 8)
 
 
-def _ws2812_setup(s, program, pin):
+def _ws2812_setup(s, program, pin, sm=0, offset=0):
     div = clkdiv_for(F_SYS, 800_000 * 10)  # ws2812_program_init: 800 kHz, T1 + T2 + T3 = 10
-    s.load(program, sm=0, pinctrl=Pins(sideset_base=pin), clkdiv=div,
+    s.load(program, sm=sm, offset=offset, pinctrl=Pins(sideset_base=pin), clkdiv=div,
            shiftctrl=AUTOPULL | pull_thresh(24) | FJOIN_TX, enable=False)
-    s.set_pindirs(0, 1 << pin, 1 << pin)
-    s.enable(0)
+    s.set_pindirs(sm, 1 << pin, 1 << pin)
+    s.enable(sm)
     bit = 10 * div
-    return FifoFeeder("frames", sm=0, fn=rainbow_word, burst=8, gap=int(24 * bit + 6250 + 500), every=500)
+    return FifoFeeder("frames", sm=sm, fn=rainbow_word, burst=8, gap=int(24 * bit + 6250 + 500), every=500)
 
 
 def ws2812(s):
@@ -218,6 +219,60 @@ def esc_serial(s):
                                                     quiet_clocks=60_000, gap_clocks=20_000))
 
 
+# ---------------------------------------------------------------------------- several programs at once
+def quad_dshot(s):
+    """dshot_bidir shared by all four SMs (one copy in the instruction memory), one motor per SM."""
+    div = clkdiv_for(F_SYS, 600_000 * 16)
+    hosts = []
+    for sm, throttle in enumerate((300, 800, 1200, 1800)):
+        m = 4 + sm
+        if sm == 0:
+            s.load("dshot_bidir", sm=0, pinctrl=Pins(out_base=m, out_count=1, set_base=m, set_count=1, in_base=m),
+                   clkdiv=div, shiftctrl=AUTOPUSH, execctrl=m << 24)
+        else:                              # the program is already in memory: configure the SM only
+            s.load("dshot_bidir", sm=sm, pinctrl=Pins(out_base=m, out_count=1, set_base=m, set_count=1, in_base=m),
+                   clkdiv=div, shiftctrl=AUTOPUSH, execctrl=m << 24)
+        hosts.append(DShotHost(f"fc{sm + 1}", sm=sm, throttle=throttle, period_clocks=20_000))
+    return from_diagram("quad_dshot", *hosts)
+
+
+IMU_CMD, IMU_BITS, IMU_DMA = 0x80 | 0x1F, 96, 2      # read from the sample register, 12 bytes, channel 2
+
+
+def fc_board(s):
+    """Four programs in one tile: IMU auto-DMA (SM0), WS2812 (SM1), UART console (SM2), status LED (SM3)."""
+    mosi, sck, cs, miso, drdy = 16, 17, 18, 19, 20
+    s.set_pull(s.pull_level & ~((1 << drdy) | (1 << miso)))  # board pull-downs: no burst before the IMU runs
+    # SM0 imu_spi_burst at 0 (13 words): `wait 1 pin 1` watches DRDY = MISO + 1
+    s.load("imu_spi_burst", sm=0, offset=0, clkdiv=4.0, shiftctrl=AUTOPUSH,
+           pinctrl=Pins(out_base=mosi, out_count=1, sideset_base=sck, set_base=cs, set_count=1, in_base=miso),
+           enable=False)
+    s.set_pins(0, (1 << cs) | (1 << sck), 1 << cs)            # CSn high, SCK low
+    s.set_pindirs(0, (1 << mosi) | (1 << sck) | (1 << cs), (1 << mosi) | (1 << sck) | (1 << cs))
+    s.push(0, (IMU_CMD << 24) | (IMU_BITS - 1))
+    s.exec(0, 0x80A0)                      # pull block
+    s.exec(0, 0xA047)                      # mov y, osr
+    s.write(DMA_CH(IMU_DMA, DMA_COUNT), IMU_BITS // 32)       # 3 words per DRDY
+    s.write(DMA_CH(IMU_DMA, DMA_FLUSH), 20_000)
+    s.write(DMA_CH(IMU_DMA, DMA_THR), 12)
+    s.write(DMA_CH(IMU_DMA, 0x00), dma_cfg(direction=OUT, mode=TRIGGERED, sm=0, trig_pin=True, trig_idx=drdy))
+    s.enable(0)
+    # SM1 ws2812 at 13 (4 words)
+    strip = _ws2812_setup(s, "ws2812", 2, sm=1, offset=13)
+    # SM2 uart_tx at 17 (4 words)
+    s.load("uart_tx", sm=2, offset=17, pinctrl=Pins(out_base=0, out_count=1, sideset_base=0), clkdiv=2.0,
+           shiftctrl=OUT_RIGHT, enable=False)
+    s.set_pindirs(2, 1, 1)
+    s.enable(2)
+    # SM3 blink at 21 (8 words)
+    s.load("blink", sm=3, offset=21, pinctrl=Pins(set_base=25, set_count=1), enable=False)
+    s.set_pindirs(3, 1 << 25, 1 << 25)
+    s.enable(3)
+    s.push(3, 20_000)
+    console = FifoFeeder("printf", sm=2, words=list(b"pio2 fc: imu ok, leds ok\r\n"), every=160)
+    return from_diagram("fc_board", RingReader("imu_ring", chan=IMU_DMA, words_per_sample=3), strip, console)
+
+
 # ---------------------------------------------------------------------------- Betaflight
 def bf_ws2812(s):
     """Betaflight's WS2812 program (light_ws2811strip_pico.c), read from $BETAFLIGHT_DIR."""
@@ -231,4 +286,5 @@ def bf_ws2812(s):
 EXAMPLES = {"Blink": blink, "UART TX": uart_hello, "Button to LED": button_led, "DShot": dshot,
             "ESC serial": esc_serial, "WS2812": ws2812, "Square wave": squarewave, "PWM": pwm,
             "UART RX": uart_rx, "Quadrature encoder": quadrature, "SPI IMU": spi_imu,
-            "I2C sensor": i2c_sensor, "Betaflight WS2812": bf_ws2812}
+            "I2C sensor": i2c_sensor, "Betaflight WS2812": bf_ws2812, "Four motors": quad_dshot,
+            "FC board (IMU auto-DMA)": fc_board}

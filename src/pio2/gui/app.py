@@ -414,6 +414,16 @@ class App:
                 imgui.set_scroll_here_y(1.0)
             imgui.end_child()
 
+    @staticmethod
+    def trace_source(e):
+        """Source column of a trace record: the IRQ flags, a DMA channel (DMA records carry the
+        channel in `src`), or a state machine."""
+        if e.src == 0xFF:
+            return "IRQ"
+        if e.name.startswith("DMA"):
+            return f"DMA{e.src}"
+        return f"SM{e.src}" if e.src < 4 else str(e.src)
+
     def trace_view(self):
         """Hardware trace records from the core's event FIFO ([SPEC-TRC-03]), newest last."""
         s = self.s
@@ -434,12 +444,13 @@ class App:
                 imgui.table_next_column()
                 imgui.text_colored(v4(MUTED), f"{e.cycle - self.b.origin:,}")
                 imgui.table_next_column()
-                if e.src == 0xFF:
-                    imgui.text_colored(v4(HIGH), "IRQ")
-                elif e.src < 4:
-                    imgui.text_colored(v4(SM_COLORS[e.src]), f"SM{e.src}")
+                label = self.trace_source(e)
+                if label == "IRQ":
+                    imgui.text_colored(v4(HIGH), label)
+                elif label.startswith("SM"):
+                    imgui.text_colored(v4(SM_COLORS[e.src]), label)
                 else:
-                    imgui.text(f"{e.src}")
+                    imgui.text_colored(v4(MUTED), label)
                 imgui.table_next_column()
                 imgui.text(e.name)
                 imgui.table_next_column()

@@ -1,0 +1,88 @@
+{
+  "pio2_diagram": 1,
+  "title": "Four motors: bidirectional DShot600 on GPIO 4-7",
+  "about": "One dshot_bidir program shared by all four state machines (27 of 32 words), one motor each; a flight-controller script per SM sends its own throttle and decodes its ESC's eRPM reply.",
+  "parts": [
+    {
+      "type": "esc",
+      "name": "ESC1",
+      "pins": {
+        "pin": 4
+      },
+      "attrs": {
+        "mode": "dshot",
+        "dshot_bit_clocks": 208.3125,
+        "reply_delay_clocks": 3750,
+        "poles": 14,
+        "max_rpm": 30000,
+        "tau_clocks": 2000000,
+        "f_sys": 125000000
+      }
+    },
+    {
+      "type": "esc",
+      "name": "ESC2",
+      "pins": {
+        "pin": 5
+      },
+      "attrs": {
+        "mode": "dshot",
+        "dshot_bit_clocks": 208.3125,
+        "reply_delay_clocks": 3750,
+        "poles": 14,
+        "max_rpm": 30000,
+        "tau_clocks": 2000000,
+        "f_sys": 125000000
+      }
+    },
+    {
+      "type": "esc",
+      "name": "ESC3",
+      "pins": {
+        "pin": 6
+      },
+      "attrs": {
+        "mode": "dshot",
+        "dshot_bit_clocks": 208.3125,
+        "reply_delay_clocks": 3750,
+        "poles": 14,
+        "max_rpm": 30000,
+        "tau_clocks": 2000000,
+        "f_sys": 125000000
+      }
+    },
+    {
+      "type": "esc",
+      "name": "ESC4",
+      "pins": {
+        "pin": 7
+      },
+      "attrs": {
+        "mode": "dshot",
+        "dshot_bit_clocks": 208.3125,
+        "reply_delay_clocks": 3750,
+        "poles": 14,
+        "max_rpm": 30000,
+        "tau_clocks": 2000000,
+        "f_sys": 125000000
+      }
+    }
+  ],
+  "probes": [
+    4,
+    5,
+    6,
+    7
+  ],
+  "labels": {
+    "4": "M1",
+    "5": "M2",
+    "6": "M3",
+    "7": "M4"
+  },
+  "view": {
+    "speed": 2000,
+    "window": 25000
+  },
+  "reference": ""
+}

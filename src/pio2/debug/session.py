@@ -69,6 +69,7 @@ def _lib():
         "stream_out_pending": ([vp, u32], u32),
         "stream_out_drain": ([vp, u32, u32, C.c_void_p, C.c_void_p], None),
         "set_oe_invert": ([vp, u32], None),
+        "set_access_hook": ([vp, C.c_void_p], None),
         "snapshot": ([vp], u32), "snapshot_copy": ([vp, C.c_void_p], None),
         "restore": ([vp, C.c_char_p, u32], None),
     }
@@ -258,6 +259,17 @@ class Session:
     def cycle(self):
         return self.lib.pio2sim_cycle(self.h)
 
+    def set_access_hook(self, fn):
+        """Call `fn()` after every clock of a register access (None: off). Device models use it to
+        answer while a host script's access runs; `fn` calls `_drain()` first when it reads the trace."""
+        if fn is None:
+            self._access_cb = None
+            self.lib.pio2sim_set_access_hook(self.h, None)
+            return
+
+        self._access_cb = C.CFUNCTYPE(None)(fn)            # kept alive while installed
+        self.lib.pio2sim_set_access_hook(self.h, C.cast(self._access_cb, C.c_void_p))
+
     def write(self, off, value):
         r = self.lib.pio2sim_write(self.h, off, value & 0xFFFF_FFFF)
         self._drain()
@@ -359,6 +371,8 @@ class Session:
         SDK's pio_sm_init does: wrap and side-set from the image, restart, jump to the start."""
         p = load_program(program) if isinstance(program, str) else program
         for i, w in enumerate(p["instructions"]):
+            if (w >> 13) == 0:             # JMP: targets are relative to the program (pio_add_program)
+                w = (w & ~0x1F) | ((w + offset) & 0x1F)
             self.write(IRAM + 4 * (offset + i), w)
         ss = p["sideset"]
         execctrl |= ((p["wrap"] + offset) << 12) | ((p["wrap_target"] + offset) << 7)

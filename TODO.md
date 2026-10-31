@@ -255,6 +255,9 @@ Next steps, in order:
    GUI driven through every control 2026-10-31 (`tests/test_gui.py`, 5 GUI bugs fixed). Missing GUI
    controls: Back / step back (Bench.back), breakpoints and watches (Bench.watches), part settings
    (DShot throttle, encoder direction), ESC / IMU / sensor state shown on their parts.
+   Multi-program examples added 2026-10-31 ("Four motors", "FC board (IMU auto-DMA)"); next ideas:
+   an example that switches a motor to ESC passthrough by pad lending ([SPEC-PIO-17], once the mux
+   exists), a DMA ring view (fill level, batches) in the GUI, WS2812 colours and ESC RPM on the parts.
 3. **Diff mode** `[SPEC-DBG-08]`: choose the reference (headblockhead/pio or picoem, Monday item 7),
    run it on the conformance set, then `src/pio2/debug/diff.py`.
 4. **Finish RP2040 parity** `[SPEC-PIO-15]` (list under "Best PIO by far" item 4).

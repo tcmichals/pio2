@@ -232,6 +232,7 @@ class I2CSlave(Part):
     `latency` must be shorter than SCL's low time. `late` counts changes that could not be made in
     time (should stay 0)."""
     kind = "i2c_slave"
+    responsive = True
 
     def __init__(self, name, sda, scl, address=0x68, regs=None, latency=16, idle_horizon=256):
         super().__init__(name, sda=sda, scl=scl)
@@ -404,6 +405,7 @@ class FifoFeeder(Part):
     `burst` words go out together and the next burst waits `gap` clocks after the previous one
     finished (FIFO empty), e.g. a WS2812 frame and its reset time."""
     kind = "fifo_feeder"
+    host = True
 
     def __init__(self, name, sm=0, words=(), fn=None, every=64, repeat=True, burst=0, gap=0, limit=None):
         super().__init__(name)
@@ -474,6 +476,7 @@ class FifoFeeder(Part):
 class RxCollector(Part):
     """Pulls SM `sm`'s RX FIFO every `every` clocks and keeps the words (last `keep`)."""
     kind = "rx_collector"
+    host = True
 
     def __init__(self, name, sm=0, every=64, keep=4096):
         super().__init__(name)
@@ -513,6 +516,7 @@ class QuadratureHost(Part):
     last word as a signed 32-bit value. pio2 has no FLEVEL register yet ([SPEC-PIO-15]), so the
     level comes through the debugger."""
     kind = "quadrature_host"
+    host = True
 
     def __init__(self, name, sm=0, every=2000):
         super().__init__(name)
@@ -545,6 +549,48 @@ class QuadratureHost(Part):
         self.next = session.cycle + self.every
 
 
+class RingReader(Part):
+    """Host side of an auto-DMA stream ([SPEC-PIO-06]): it never touches the PIO registers per sample;
+    every `every` clocks it collects whatever the DMA channel `chan` has sent on the link (the ring's
+    batches) and splits it into samples of `words_per_sample` words, decoded as big-endian int16 values.
+    `register_accesses` stays 0 while streaming, which is the point."""
+    kind = "ring_reader"
+    host = True
+
+    def __init__(self, name, chan=2, words_per_sample=3, every=20_000):
+        super().__init__(name)
+        self.chan, self.wps, self.every = chan, words_per_sample, every
+        self.params = {"chan": chan, "words_per_sample": words_per_sample, "every": every}
+        self.words = []
+        self.samples = []
+        self.batches = 0
+        self.register_accesses = 0
+        self.next = None
+
+    def attach(self, session):
+        super().attach(session)
+        self.next = session.cycle + self.every
+
+    def wake(self, cycle):
+        return self.next
+
+    def apply(self, session):
+        if self.next is None or session.cycle < self.next:
+            return
+        got = [w for w, _ in session.stream_out(self.chan)]
+        if got:
+            self.batches += 1
+            self.words += got
+            while len(self.words) >= self.wps:
+                block, self.words = self.words[:self.wps], self.words[self.wps:]
+                raw = b"".join(w.to_bytes(4, "big") for w in block)
+                vals = [int.from_bytes(raw[i:i + 2], "big", signed=True) for i in range(0, len(raw) - 1, 2)]
+                self.samples.append(vals)
+                if len(self.samples) > 1000:
+                    del self.samples[:-1000]
+        self.next = session.cycle + self.every
+
+
 class UartRxHost(RxCollector):
     """RX FIFO reader for a UART receiver program that leaves each byte in bits [31:24]."""
     kind = "uart_rx_host"
@@ -567,6 +613,7 @@ class DShotHost(Part):
     `period_clocks`, and the two capture words of each reply decoded with `pio2.dshot_ref`
     (`samples_per_bit` = reply bit time / sample time)."""
     kind = "dshot_host"
+    host = True
 
     def __init__(self, name, sm=0, throttle=1046, period_clocks=20_000, samples_per_bit=2.56, poles=14):
         super().__init__(name)
@@ -621,6 +668,7 @@ class EscSerialHost(Part):
     collects the ESC's answer until the line has been quiet for `quiet_clocks`, then the next
     message `gap_clocks` later. Bytes arrive in RX bits [31:24]."""
     kind = "esc_serial_host"
+    host = True
 
     def __init__(self, name, sm=0, messages=(), poll_clocks=2000, quiet_clocks=60_000, gap_clocks=20_000):
         super().__init__(name)
@@ -691,6 +739,7 @@ class ImuHost(Part):
     runs) and decodes big-endian int16 values. Every check happens at its own poll cycles; the RX
     level is read through VPI (no clocks), as a CPU polls FSTAT."""
     kind = "imu_host"
+    host = True
 
     def __init__(self, name, sm=0, drdy=None, data_reg=0x1F, count=12, poll_clocks=32, who_am_i_reg=0x75):
         super().__init__(name)
@@ -769,6 +818,7 @@ class I2cHost(Part):
     raises its IRQ flag) is counted in `errors` and the SM is resumed as
     pio_i2c_resume_after_error does."""
     kind = "i2c_host"
+    host = True
 
     def __init__(self, name, sm=0, address=0x48, reg=0, count=2, period_clocks=200_000, poll_clocks=256,
                  entry_point=12):

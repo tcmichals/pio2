@@ -33,6 +33,7 @@ struct Sim {
     std::vector<uint32_t> out_q[16];   // output-stream words per channel 2..9
     std::vector<uint8_t> out_last[16];
     uint64_t cycle = 0;
+    void (*access_hook)() = nullptr;   // called after each clock of a register access
     uint32_t ext = 0;        // levels the parts drive
     uint32_t ext_mask = 0;   // lines the parts drive
     uint32_t pull = 0xFFFFFFFFu;   // level of a line nobody drives
@@ -212,6 +213,10 @@ void pio2sim_reset(void* h, int cycles) {
     s->top->eval();
 }
 
+// Python sets a callback that runs after every clock of a register access, so device models keep
+// answering while a host script reads or writes a register (a few clocks each).
+void pio2sim_set_access_hook(void* h, void (*fn)()) { static_cast<Sim*>(h)->access_hook = fn; }
+
 uint64_t pio2sim_cycle(void* h) { return static_cast<Sim*>(h)->cycle; }
 
 void pio2sim_set_ext(void* h, uint32_t value, uint32_t mask, uint32_t pull) {
@@ -274,6 +279,7 @@ int pio2sim_write(void* h, uint32_t offset, uint32_t value) {
         const bool bv = t->s_axil_bvalid;
         const int resp = t->s_axil_bresp;
         s->step();
+        if (s->access_hook) s->access_hook();
         if (awr) t->s_axil_awvalid = 0;
         if (wr) t->s_axil_wvalid = 0;
         if (bv) {
@@ -300,6 +306,7 @@ int pio2sim_read(void* h, uint32_t offset, uint32_t* value) {
         const uint32_t data = t->s_axil_rdata;
         const int resp = t->s_axil_rresp;
         s->step();
+        if (s->access_hook) s->access_hook();
         if (arr) t->s_axil_arvalid = 0;
         if (rv) {
             t->s_axil_rready = 0;

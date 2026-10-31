@@ -26,6 +26,8 @@ import bisect
 class Part:
     kind = "part"
     reactive = False                       # True: needs update() after every clock
+    host = False                           # True: a host script (makes register accesses itself)
+    responsive = False                     # True: answers the master's edges (SPI / I2C slave)
 
     def __init__(self, name, **pins):
         self.name = name

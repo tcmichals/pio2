@@ -225,6 +225,7 @@ class Esc(Part):
     hex strings; "*" matches anything), or nothing.
     """
     kind = "esc"
+    responsive = True
 
     def __init__(self, name, pin, mode="dshot", dshot_bit_clocks=208, reply_delay_clocks=3750,
                  poles=14, max_rpm=30000, tau_clocks=2_000_000, f_sys=125e6, baud_clocks=6510,
@@ -361,6 +362,7 @@ class SpiImu(Part):
     changes made too late (should stay 0).
     """
     kind = "imu"
+    responsive = True
 
     def __init__(self, name, sck, mosi, miso, cs, drdy=None, regs=None, who_am_i_reg=0x75,
                  who_am_i=0x47, data_reg=0x1F, odr_clocks=12500, drdy_clocks=None, latency=4,
