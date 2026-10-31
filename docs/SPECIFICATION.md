@@ -217,7 +217,9 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 ### `[SPEC-PIO-17]` Runtime Pad Owner Select: Lend a Pad to Another Tile (pio2 Extension)
 * **Goal (project owner, 2026-10-31)**: for ESC passthrough (motors disarmed) a motor pad is handed to
   a tile whose normal job is not needed then (NeoPixel, RC PWM decode), reloaded with `esc_serial`;
-  the DShot tile keeps its program and the other motors. No extra tile, no reload of the DShot tile.
+  the DShot tile keeps its program loaded (stopped, `[SPEC-PIO-13]`: every other motor wire an input),
+  so leaving passthrough is: give the pad back, enable the DShot SMs. No extra tile, no reload of the
+  DShot tile. One motor at a time (the configurator enters passthrough for one motor index).
   **Status: proposed, not implemented.**
 * **Requirement (pin map)**: a pad in `hw/<board>/pins.toml` (`[SPEC-PIO-09]`) has its home tile and pin
   and may list **alternates** (tile, tile pin). Only listed pairs are wired; the mux is built from the
@@ -234,9 +236,9 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
   `[SPEC-PIO-11]` applies to lending a motor pad.
 * **Relation**: `[SPEC-PIO-16]` (preload) is then optional for the passthrough case; it stays useful
   for switching a whole tile in one clock.
-* **Verified by**: `cocotb-regression` (lend motor pad 2 to the LED tile running `esc_serial`, DShot
-  continues on motors 1, 3, 4; refused while either side drives; no clock with two drivers;
-  give it back), `rtl-lint`, `fpga-fit` (mux cost), `board-bringup` (Tang Nano 9K one-motor bench)
+* **Verified by**: `cocotb-regression` (DShot tile stopped and pads released, lend motor pad 2 to the
+  LED tile running `esc_serial`, bytes both ways; refused while either side drives; no clock with two
+  drivers; give it back, DShot resumes with no reload), `rtl-lint`, `fpga-fit` (mux cost), `board-bringup` (Tang Nano 9K one-motor bench)
 * **Implementation Target**: board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`, `src/rtl/pio2_core_regs.sv`
 
 ### `[SPEC-PIO-11]` Program Library and Loading

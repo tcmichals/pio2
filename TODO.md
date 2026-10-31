@@ -79,7 +79,9 @@ To do, in order:
    (a) reload over the link (today), (b) tile preload `[SPEC-PIO-16]` (whole-tile swap),
    (c) **lend the motor pad to a tile not needed while disarmed** `[SPEC-PIO-17]` (proposed): NeoPixel /
    RC PWM tile reloaded with esc_serial, per-pad `OWNER` select built from `pins.toml` alternates,
-   handover only while both sides have `oe` = 0. Per motor, no extra tile, DShot tile untouched.
+   handover only while both sides have `oe` = 0. One motor at a time, disarmed (confirmed in the
+   configurator 2026-10-31: no DShot panel while passthrough_active); DShot tile stopped but not
+   reloaded; no extra tile.
    Leaning (c) for passthrough; (b) optional. Next: per-board tile allocation (which tile runs DShot,
    LED, PWM, IMU) written down for 9K / 20K; `fpga-fit` mux cost.
    Motor bench: a **Tang Nano 9K one-motor bitstream** (one motor pin, ESC simulator or load, no
