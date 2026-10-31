@@ -139,6 +139,7 @@ class Bench:
         self.replaying = False
         self.last_stop = None
         self.horizon = 0                   # furthest cycle of the current timeline
+        self.origin = self.s.cycle
         if example is not None:
             self.load(example)
 
@@ -163,7 +164,14 @@ class Bench:
         self.history.take(s, self.parts, 0)
         self.last_stop = None
         self.horizon = s.cycle
+        self.origin = s.ts_base            # the model clock never goes back; shown cycles (and the trace
+                                           # timestamps) count from the reset that starts the load
         return self.ex
+
+    @property
+    def cycle(self):
+        """Clocks since the example was loaded (what the user sees as the cycle)."""
+        return self.s.cycle - self.origin
 
     @property
     def parts(self):

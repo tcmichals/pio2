@@ -109,6 +109,7 @@ class App:
     # ------------------------------------------------------------ model
     def load_example(self, name):
         self.example_name = name
+        self.step_note = ""
         self.ex = self.b.load(name)
         self.speed, self.window = self.ex.speed, self.ex.window
 
@@ -124,9 +125,11 @@ class App:
         s = self.s
         if imgui.button("  Pause  " if self.running else "  Run  "):
             self.running = not self.running
+            self.step_note = ""
         imgui.same_line()
         imgui.begin_disabled(self.running)
         if imgui.button("Step clock"):
+            self.step_note = ""
             self.b.step_clock()               # exactly one clock
         imgui.same_line()
         if imgui.button(f"Step instr SM{self.sel_sm}"):
@@ -152,8 +155,8 @@ class App:
                     self.load_example(name)
             imgui.end_combo()
         imgui.same_line()
-        t = s.cycle / self.f_sys
-        imgui.text_colored(v4(ACCENT), f"cycle {s.cycle:,}")
+        t = self.b.cycle / self.f_sys
+        imgui.text_colored(v4(ACCENT), f"cycle {self.b.cycle:,}")
         imgui.same_line()
         imgui.text_colored(v4(MUTED), f"{t * 1e6:,.2f} us at {self.f_sys / 1e6:.0f} MHz")
         if self.step_note:
@@ -222,7 +225,13 @@ class App:
                                col(ACCENT, 0.25) if filled else col(PANEL2), 6)
             if filled:
                 txt = f"{words[i]:08x}" if w >= 80 else f"{words[i]:x}"
+                fit = max(2, int((w - 10) // 7))
+                if len(txt) > fit:
+                    txt = "\u2026" + txt[-(fit - 1):]
                 dl.add_text(ImVec2(x + 6, p.y + 3), col(TEXT), txt)
+                mx, my = imgui.get_mouse_pos().x, imgui.get_mouse_pos().y
+                if x <= mx <= x + w and p.y <= my <= p.y + h:
+                    imgui.set_tooltip(f"{label} [{i}]: 0x{words[i]:08x}  ({words[i]})")
         imgui.dummy(ImVec2(cap * (w + gap), h + 2))
 
     def state(self):
@@ -248,8 +257,9 @@ class App:
                             ("ISR", f"0x{st['isr']:08x}   shift count {st['isr_count']}"),
                             ("OSR", f"0x{st['osr']:08x}   shift count {st['osr_count']}"),
                             ("delay", str(st["delay_cycles"])),
-                            ("clock div", f"{st['clkdiv'] >> 8}.{st['clkdiv'] & 0xFF:03d}/256   "
-                                          f"count {st['clkdiv_int_cnt']}"),
+                            ("clock div", f"{st['clkdiv'] >> 8} + {st['clkdiv'] & 0xFF}/256"
+                                          f" = {(st['clkdiv'] >> 8) + (st['clkdiv'] & 0xFF) / 256:.4f}"
+                                          f"   count {st['clkdiv_int_cnt']}"),
                             ("PINCTRL", f"0x{st['pinctrl']:08x}"),
                             ("EXECCTRL", f"0x{st['execctrl']:08x}"),
                             ("SHIFTCTRL", f"0x{st['shiftctrl']:08x}"),
@@ -328,56 +338,65 @@ class App:
         px = cx + chip_w + 190
         py = cy + 10
         wired = [p for p in self.ex.parts if p.pins]      # host scripts (FIFO feeders) have no pins
+        wires = [(part, pin) for part in wired for pin in dict.fromkeys(part.pins.values())]
+        left_wires = [w_ for w_ in wires if w_[1] < 16]
         for part in wired:
-            pin = next(iter(part.pins.values()))
-            sx, sy = pin_pos[pin]
-            sx += 14 if pin >= 16 else -14
-            target = ImVec2(px, py + 30)
-            if pin < 16:                       # left pins: out past the labels, over the chip, to the part
-                lane = wired.index(part)
-                nlanes = len(wired)
-                left = p0.x + 18 + 12 * lane            # nested lanes: no two wires cross
-                top = cy - 26 - 12 * (nlanes - 1 - lane)
-                pts = [ImVec2(sx, sy), ImVec2(left, sy), ImVec2(left, top), ImVec2(px - 40 - 12 * lane, top),
-                       ImVec2(px - 40 - 12 * lane, target.y), target]
-                for a_, b_ in zip(pts, pts[1:]):
-                    dl.add_line(a_, b_, col(ACCENT, 0.7), 2.5)
-                for c_ in pts[1:-1]:
-                    dl.add_circle_filled(c_, 1.25, col(ACCENT, 0.7))
-            else:
-                dl.add_bezier_cubic(ImVec2(sx, sy), ImVec2(sx + 80, sy), ImVec2(px - 80, py + 30),
-                                    target, col(ACCENT, 0.7), 2.5)
+            pins = list(dict.fromkeys(part.pins.values()))
+            for pin in pins:
+                self._wire(dl, pin_pos, pin, part, px, py, p0, cy, left_wires)
             dl.add_rect_filled(ImVec2(px, py), ImVec2(px + 200, py + 60), col(PANEL2), 10)
             dl.add_text(ImVec2(px + 70, py + 10), col(TEXT), part.name)
-            dl.add_text(ImVec2(px + 70, py + 30), col(MUTED), f"GP{pin}")
-            centre = ImVec2(px + 34, py + 30)
-            if part.kind == "led":
-                if part.on:
-                    for r, a in ((26, 0.10), (20, 0.18), (15, 0.35)):
-                        dl.add_circle_filled(centre, r, col(part.color, a))
-                    dl.add_circle_filled(centre, 11, col(part.color))
-                else:
-                    dl.add_circle_filled(centre, 11, col(part.color, 0.18))
-                dl.add_circle(centre, 11, col((1, 1, 1), 0.25), 0, 1.5)
-            elif part.kind == "button":
-                imgui.set_cursor_screen_pos(ImVec2(px + 12, py + 10))
-                imgui.invisible_button(f"##{part.name}", ImVec2(44, 40))
-                if imgui.is_item_activated():
-                    self.b.part_call(part.name, "set", True)
-                elif imgui.is_item_deactivated():
-                    self.b.part_call(part.name, "set", False)
-                pressed = part.pressed
-                c = ACCENT if pressed else (0.3, 0.32, 0.38)
-                dl.add_rect_filled(ImVec2(px + 14, py + 14), ImVec2(px + 54, py + 46),
-                                   col((0.2, 0.21, 0.25)), 8)
-                dl.add_circle_filled(centre, 12 if not pressed else 10, col(c))
-                dl.add_text(ImVec2(px + 120, py + 30), col(MUTED), "hold me")
-            elif part.kind == "terminal":
-                dl.add_rect_filled(ImVec2(px + 14, py + 14), ImVec2(px + 54, py + 46),
-                                   col((0.05, 0.06, 0.07)), 6)
-                dl.add_text(ImVec2(px + 20, py + 22), col(ACCENT), ">_")
+            dl.add_text(ImVec2(px + 70, py + 30), col(MUTED), "GP" + " ".join(str(n) for n in sorted(pins)))
+            self._part_body(dl, part, px, py)
             py += 90
         imgui.dummy(avail)
+
+    def _wire(self, dl, pin_pos, pin, part, px, py, p0, cy, left_wires):
+        sx, sy = pin_pos[pin]
+        sx += 14 if pin >= 16 else -14
+        target = ImVec2(px, py + 30)
+        if pin < 16:                       # left pins: out past the labels, over the chip, to the part
+            lane = left_wires.index((part, pin))
+            nlanes = len(left_wires)
+            left = p0.x + 18 + 12 * lane            # nested lanes: no two wires cross
+            top = cy - 26 - 12 * (nlanes - 1 - lane)
+            pts = [ImVec2(sx, sy), ImVec2(left, sy), ImVec2(left, top), ImVec2(px - 40 - 12 * lane, top),
+                   ImVec2(px - 40 - 12 * lane, target.y), target]
+            for a_, b_ in zip(pts, pts[1:]):
+                dl.add_line(a_, b_, col(ACCENT, 0.7), 2.5)
+            for c_ in pts[1:-1]:
+                dl.add_circle_filled(c_, 1.25, col(ACCENT, 0.7))
+        else:
+            dl.add_bezier_cubic(ImVec2(sx, sy), ImVec2(sx + 80, sy), ImVec2(px - 80, py + 30),
+                                target, col(ACCENT, 0.7), 2.5)
+
+    def _part_body(self, dl, part, px, py):
+        centre = ImVec2(px + 34, py + 30)
+        if part.kind == "led":
+            if part.on:
+                for r, a in ((26, 0.10), (20, 0.18), (15, 0.35)):
+                    dl.add_circle_filled(centre, r, col(part.color, a))
+                dl.add_circle_filled(centre, 11, col(part.color))
+            else:
+                dl.add_circle_filled(centre, 11, col(part.color, 0.18))
+            dl.add_circle(centre, 11, col((1, 1, 1), 0.25), 0, 1.5)
+        elif part.kind == "button":
+            imgui.set_cursor_screen_pos(ImVec2(px + 12, py + 10))
+            imgui.invisible_button(f"##{part.name}", ImVec2(44, 40))
+            if imgui.is_item_activated():
+                self.b.part_call(part.name, "set", True)
+            elif imgui.is_item_deactivated():
+                self.b.part_call(part.name, "set", False)
+            pressed = part.pressed
+            c = ACCENT if pressed else (0.3, 0.32, 0.38)
+            dl.add_rect_filled(ImVec2(px + 14, py + 14), ImVec2(px + 54, py + 46),
+                               col((0.2, 0.21, 0.25)), 8)
+            dl.add_circle_filled(centre, 12 if not pressed else 10, col(c))
+            dl.add_text(ImVec2(px + 120, py + 30), col(MUTED), "hold me")
+        elif part.kind == "terminal":
+            dl.add_rect_filled(ImVec2(px + 14, py + 14), ImVec2(px + 54, py + 46),
+                               col((0.05, 0.06, 0.07)), 6)
+            dl.add_text(ImVec2(px + 20, py + 22), col(ACCENT), ">_")
 
     def terminal(self):
         terms = [p for p in self.ex.parts if p.kind == "terminal"]
@@ -413,7 +432,7 @@ class App:
             for e in s.events[-400:]:
                 imgui.table_next_row()
                 imgui.table_next_column()
-                imgui.text_colored(v4(MUTED), f"{e.cycle:,}")
+                imgui.text_colored(v4(MUTED), f"{e.cycle - self.b.origin:,}")
                 imgui.table_next_column()
                 if e.src == 0xFF:
                     imgui.text_colored(v4(HIGH), "IRQ")
@@ -523,7 +542,17 @@ def main():
         a.warmup -= k
     app.running = not a.paused
     frames = {"n": 0}
+    rp, addons = runner(app, frames, a.screenshot, a.frames)
+    immapp.run(rp, addons)
+    if a.screenshot:
+        write_png(a.screenshot, hello_imgui.final_app_window_screenshot())
+        print(f"saved {a.screenshot} after {frames['n']} frames, cycle {app.s.cycle}")
+    app.s.close()
 
+
+def runner(app, frames, screenshot=None, n_frames=90):
+    """The window, docking layout and per-frame callback for `app` (also used by the GUI tests,
+    which add ImGui Test Engine on top)."""
     rp = hello_imgui.RunnerParams()
     rp.app_window_params.window_title = "pio2 debugger: PIO RTL on Verilator"
     rp.app_window_params.window_geometry.size = (1680, 1000)
@@ -536,7 +565,7 @@ def main():
     def before_frame():
         app.frame()
         frames["n"] += 1
-        if a.screenshot and frames["n"] >= a.frames:
+        if screenshot and frames["n"] >= n_frames:
             hello_imgui.get_runner_params().app_shall_exit = True
 
     rp.callbacks.pre_new_frame = before_frame
@@ -574,11 +603,7 @@ def main():
     rp.docking_params.layout_condition = hello_imgui.DockingLayoutCondition.application_start
     addons = immapp.AddOnsParams()
     addons.with_implot = True
-    immapp.run(rp, addons)
-    if a.screenshot:
-        write_png(a.screenshot, hello_imgui.final_app_window_screenshot())
-        print(f"saved {a.screenshot} after {frames['n']} frames, cycle {app.s.cycle}")
-    app.s.close()
+    return rp, addons
 
 
 if __name__ == "__main__":

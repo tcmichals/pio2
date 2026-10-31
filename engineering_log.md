@@ -502,3 +502,31 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   through `pio2-debug`; SpecTrace drift 0, skills 0, verifies 2 (pre-existing).
 * **Not verified**: watches while replaying recorded history (not checked during a redo);
   `step_instr` behind the horizon starts a new timeline instead of replaying; GUI interactively.
+
+## 2026-10-31: GUI driven through every control (ImGui Test Engine); five GUI bugs fixed
+
+* **Category**: `product-bug` (5), `tool-bug` (screenshot), `process-gap` (GUI never driven)
+* **What**: `tests/test_gui.py` runs the real `pio2-gui` window with Dear ImGui Test Engine (bundled in
+  imgui-bundle, `immapp.testing.run`) and clicks widgets by label: Run / Pause, Step clock (+1 exactly),
+  Step instr SM0, the SM0..SM3 tabs, Step instr on a disabled SM, the clocks / frame slider (speed
+  checked from the clock), Reset, the logic analyzer's clocks shown slider, all 13 examples from the
+  list (each loads and runs), the Terminal (UART TX text), the Trace window, and holding the Button
+  part (LED follows, off on release). `main()` now builds its window through `runner()`, which the
+  test reuses. Screenshots: set `PIO2_GUI_SHOTS=<dir>`. Skipped without a display.
+* **Bugs found and fixed** (each seen in the screenshots or by a check):
+  1. Reset showed the model's running clock (19,856 after Reset): the model clock never goes back.
+     `Bench.origin` / `Bench.cycle`: shown cycles count from the reset that starts the load.
+  2. The Trace window showed model clocks (479,516) next to the Controls bar's cycle; now relative
+     to the same origin (records made during the example's setup included).
+  3. "SM1 is disabled" stayed on screen after any later action and example change.
+  4. Multi-pin parts (SPI IMU, I2C sensor, encoder) were drawn with one wire to their first pin only.
+  5. "clock div 13.005/256" read as a quotient; now "13 + 5/256 = 13.0195". FIFO words wider than
+     their box are cut with an ellipsis and shown in full on hover (they overlapped).
+* **Tool fact**: names with `/` in ImGui Test Engine paths need `\/` ("clocks \/ frame"); docked
+  windows are focused by absolute ref ("//Terminal"). `--screenshot` after exactly 5 frames comes
+  back black every time here (3 and 10 are fine): a capture quirk of hello_imgui under this
+  compositor, not the app; the test uses the engine's own capture.
+* **Evidence**: `pytest tests/test_gui.py` 1 passed (25 s, real window on :0); full suite 551 passed,
+  1 failed (known `test_trace_ctf`); SpecTrace drift 0, verifies 2 (pre-existing).
+* **Not verified**: keyboard use; window docking / resizing by hand; the GUI on X11 or another
+  desktop; there is still no GUI control for Back (reverse step) or breakpoints.
