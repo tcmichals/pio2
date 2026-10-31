@@ -387,6 +387,12 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   edits to a branch and switched back, which removed them from its working tree for about a minute;
   restored exactly, branch `wip/e906-rpmsg-after-crash` left for that agent to delete. Rule: a pio2
   session does not change ~/projects/AbstractX's working tree.
+* **Process gap (checkouts)**: two pio2 checkouts on two disks. Work before the crash was in the USB
+  copy (`/run/media/tcmichals/projects/pio2`); this session opened `~/projects/pio2`, 24 commits behind,
+  and nothing said so until `git status -sb`. Both are clones of origin, so nothing was lost; the home
+  copy was fast-forwarded. Rule: check `git status -sb` against origin at session start.
+* **Tool fact**: bare `pytest` collects `third_party/verilog-axi/tb` and stops on an import error; run
+  `pytest tests`.
 * **Evidence**: spectrace `--check-drift` 0, `--check-skills` 0 problems; `pytest tests` in
   ~/projects/pio2 492 passed, 1 failed (`test_trace_ctf.py::test_debugger_session_records_to_ctf`,
   1930 events where > 2000 expected; not diagnosed, possibly TODO item 1).

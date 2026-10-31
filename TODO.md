@@ -16,6 +16,19 @@ Updated 2026-10-31. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
 
+## After the crash (2026-10-31)
+
+* **Work in `~/projects/pio2` and `~/projects/AbstractX`** (internal disk). The copies under
+  `/run/media/tcmichals/projects/` (USB drive) were used before the crash; `~/projects/pio2` was 24
+  commits behind until pulled (now level with origin). The USB AbstractX copy is 2 commits behind.
+* **AbstractX has its own agent** (session `abstractx-38`): a pio2 session does not commit, stash or
+  switch branches there. Its 10 uncommitted E906 RPMsg / tracer / UART files are backed up on
+  `wip/e906-rpmsg-after-crash` (7347c34, on origin); that agent was asked to finish or discard them
+  and delete the branch.
+* **Run pytest as `uv run pytest tests`**: a bare `pytest` also collects
+  `third_party/verilog-axi/tb` and stops on an import error.
+* Evidence after the pull: `uv sync` ok; `pytest tests` 492 passed, 1 failed (item 2 below).
+
 ## Monday (handoff 2026-10-31)
 
 Done 2026-10-31: `main` and both worktree branches pushed to origin; branch 1
@@ -67,7 +80,7 @@ To do, in order:
    program words + config and replays stimulus; compare Pico / Verilator / Tang / Zynq pin traces at SM
    clock resolution; every difference becomes a failing cocotb test first.
 10. **Reload time DShot <-> ESC serial on Tang Nano 20K + A5E E906** `[SPEC-VER-05]`: both programs are
-   27 instructions (54 > 32 words), so switching on one tile is a reload. Host is the E906 (AbstractX
+   27 instructions (54 > 32 words), so switching on one tile is a reload; now the fallback only (item 12). Host is the E906 (AbstractX
    offload, SPI DMA, Dual SPI), not Linux spidev: preload both programs' REG_WRITE frames (CRC done) in
    SRAM, DMA them back to back, check ACKs after. Estimate (not measured): ~200 bytes, ~80 us at 10 MHz
    Dual SPI, ~20 us at 50 MHz, so tens of microseconds. Next: E906 side of the preload in AbstractX,
@@ -77,24 +90,37 @@ To do, in order:
    instruction bank + staging SM config + `PRELOAD_SWAP` one-write swap in one clock. Review the spec
    (register offsets 0x200..0x2FC, key 0xA5, whole-tile swap), then RTL in `asp_pio_tile.sv` with a
    failing cocotb test first, `fpga-fit` cost on 9K / 20K, host API in `src/pio2/host/`, E906 side in
-   AbstractX. Makes item 10 a one-word write.
-12. **Switch options, then test on the motor bench** (project owner, 2026-10-31):
-   (a) reload over the link (today), (b) tile preload `[SPEC-PIO-16]` (whole-tile swap),
-   (c) **lend the motor pad to a tile not needed while disarmed** `[SPEC-PIO-17]` (proposed): NeoPixel /
-   RC PWM tile reloaded with esc_serial, per-pad `OWNER` select built from `pins.toml` alternates,
-   handover only while both sides have `oe` = 0. One motor at a time, disarmed (confirmed in the
-   configurator 2026-10-31: no DShot panel while passthrough_active); DShot tile stopped but not
-   reloaded; no extra tile.
-   Betaflight (checkout `../quadcopter/betaflight`, d593400a0): `esc4wayInit()` (`src/main/io/serial_4way.c:139`)
-   calls `motorDisable()` and switches **all** motor lines to inputs held high; the 4-way protocol then
-   selects one ESC per command. `MSP_SET_PASSTHROUGH` itself has no ARMED check; arming is blocked by
-   `MSP_SET_ARMING_DISABLED` (99), which the Python configurator never sends (finding for the
-   configurator repo, not fixed). rt-fc-offloader (reference for `[SPEC-PIO-13]`) is not on this PC.
-   Leaning (c) for passthrough; (b) optional. Next: per-board tile allocation (which tile runs DShot,
-   LED, PWM, IMU) written down for 9K / 20K; `fpga-fit` mux cost.
-   Motor bench: a **Tang Nano 9K one-motor bitstream** (one motor pin, ESC simulator or load, no
-   props) to test (a), (b) and (c) on one ESC: switch time, pin held / no glitch, ESC answers in
-   passthrough, DShot resumes after the swap back. Part of `[SPEC-VER-03]` / `[SPEC-VER-05]`.
+   AbstractX. Makes item 10 a one-word write. Optional now that passthrough uses pad lending (item 12).
+12. **Passthrough hot switch by pad lending** `[SPEC-PIO-17]` (decided 2026-10-31, project owner; spec
+   `a0d4be0`, not implemented). ESC / motor testing loads no RC decode or NeoPixel tiles, so it uses
+   5 SMs: 4 DShot on the motor tile + 1 `esc_serial` on a spare **switch tile**, loaded once and kept
+   loaded. Enter: disarmed check, stop DShot, release all motor pads, write `OWNER` of the chosen pad
+   to the switch tile, break 50 ms; leave: pad back, re-enable DShot. No program load on either tile.
+   Reload (item 10) and preload (item 11) are fallbacks.
+   **Next step (project owner, 2026-10-31)**: the pad-owner mux in RTL with its cocotb test (lend
+   motor pad 2, exchange bytes, give it back, DShot resumes).
+   Next, in order: (a) per-board tile allocation for 9K / 20K written down (which tile is motor,
+   switch, LED, PWM, IMU); (b) `OWNER` mux built from `pins.toml` alternates, RTL in
+   `pio2_core_regs.sv` + board tops, with a failing cocotb test first (lend pad 2, bytes both ways,
+   refused while either side drives, no clock with two drivers, DShot resumes with no reload);
+   (c) `fpga-fit` mux cost; (d) Tang Nano 9K one-motor bench (switch time, no glitch, ESC answers,
+   DShot resumes), part of `[SPEC-VER-03]` / `[SPEC-VER-05]`.
+   Reference checked 2026-10-31: github.com/tcmichals/rt-fc-offloader `22fce99`
+   (`wb_serial_dshot_mux.sv`, `wb_esc_uart.sv`) agrees with `[SPEC-PIO-13]` (details in
+   engineering_log.md). Betaflight `d593400a0`: `esc4wayInit()` stops all motors and makes every motor
+   line an input; `MSP_SET_PASSTHROUGH` has no ARMED check.
+13. **MSP sniffer + 4-way interface in the Linux Python app** `[SPEC-PIO-13]` (decided 2026-10-31,
+   project owner; not implemented): `src/pio2/host/msp_passthrough.py`. MSPv1 245 (empty or mode
+   0xFF) enters, refused while armed, reply ESC count; the app takes Betaflight's `serial_4way.c` role
+   (frames `0x2F`, answers `0x2E`); exit on `0x34` or 5 s; `MSP_IDENT` does not enter; motor commands
+   refused in between. host-tests first (each rule a test), then compare frame by frame with the
+   configurator's `MSP/fourway.py`.
+14. **python-imgui-esc-configurator** (github.com/tcmichals/python-imgui-esc-configurator; local
+   copies `~/projects/quadcopter/esc-configurator` and the USB one are identical, at `main` e301160):
+   branch `feat/asyncio-kernel` (54c072a, 3 ahead / 4 behind main) adds `comm_proto/asp_tlp.py`
+   (64-byte AbstractX TLPs, channel 0x05 = ESC passthrough); compare with pio2's link frames
+   `[SPEC-LINK-02]`. Untracked `studio_plugin/esc_plugin.py` in both copies is not on GitHub. The
+   configurator never sends `MSP_SET_ARMING_DISABLED` (99) (fix belongs in that repo).
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
@@ -233,8 +259,15 @@ Next steps, in order:
 * 2026-10-29: full validation ([SPEC-VER-01]): formal on every bus port, UVM-style pyuvm testbenches,
   functional coverage closure per block.
 
+* 2026-10-31 (project owner): the MSP passthrough sniffer lives in the Linux Python app, not in the
+  FPGA (the MSP stream ends there anyway) ([SPEC-PIO-13]).
+* 2026-10-31 (project owner): ESC passthrough uses 5 SMs, 4 DShot + 1 `esc_serial` on a spare switch
+  tile, switched by pad lending with no program load ([SPEC-PIO-17]); reload is the fallback.
+
 ## Open questions
 
+* Commit `studio_plugin/` in the ESC configurator repo, or drop it?
+* Should passthrough entry also send / honour `MSP_SET_ARMING_DISABLED` (99)?
 
 * Debugger GUI: imgui-bundle with a custom theme first, web/Tauri front end later if needed.
 * Tang Primer 20K: move with the other Tang boards (assumed yes).
