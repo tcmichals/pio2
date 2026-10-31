@@ -49,6 +49,13 @@ To do, in order:
    clean tree and commit the ledger; SpecTrace `--check-drift/--check-skills/--check-verifies`.
 6. **Merge the debugger branch** `worktree-agent-aa5ce2bdeac89fae2` (hand-merge `session.py`,
    `pio2sim.cpp`; 99d587f untested), then the SPI link RTL review (below).
+7. **Survey of other PIO simulators** (never done: `docs/DEBUGGER_SPECIFICATION.md` §2 lists only
+   Wokwi, rp2040pio, rp2040-pio-emulator, unchecked). (a) Web survey of current PIO simulators,
+   emulators and debuggers (RP2040 and RP2350 PIO v1), with maintenance state and license; (b) feature
+   table against pio2 in §2 (cycle accuracy, delay / side-set, fractional clock divider, multi-SM, IRQ,
+   FIFO join, GPIO / stimulus, GUI, scripting, reverse step); links go in `docs/references.md`
+   (linked, never copied); (c) choose the reference emulator for diff mode `[SPEC-DBG-08]` (M6) and
+   record the choice under Decisions.
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
