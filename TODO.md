@@ -248,16 +248,21 @@ Next steps, in order:
 
 1. ~~Merge the debugger branch (M3-M7)~~: **done 2026-10-31** (Bench, stimulus, parts, diagrams,
    snapshots; CLI / GUI / tests moved to `Bench`; reverse step and PC breakpoint tested).
-2. **Test what the branch brought**: stimulus generators against their protocols (DShot ESC reply,
-   I2C sensor, SPI IMU sample bytes, UART RX, ESC serial answers), watches on pin / stall / IRQ /
-   FIFO / registers, reverse step across a part action (button press) ([SPEC-DBG-04], [SPEC-DBG-06],
-   [SPEC-DBG-07]); then a GUI "Back" control on `Bench.back`.
+2. ~~Test what the branch brought~~: **done 2026-10-31** (`tests/test_debug_stimulus.py`; 5 bugs
+   fixed, see engineering_log.md). Left: watches checked while replaying history (a redo skips them);
+   `step_instr` behind the horizon replays instead of starting a new timeline; a GUI "Back" control on
+   `Bench.back`; confirm the pio_i2c one-bit shift on a real Pico ([SPEC-VER-04]).
 3. **Diff mode** `[SPEC-DBG-08]`: choose the reference (headblockhead/pio or picoem, Monday item 7),
    run it on the conformance set, then `src/pio2/debug/diff.py`.
 4. **Finish RP2040 parity** `[SPEC-PIO-15]` (list under "Best PIO by far" item 4).
 5. **Install and speed**: prebuilt simulator model in a wheel (`pip install pio2[gui]`), measured
    clocks / second per example; a smaller tile (blocker below) simulates faster too.
 6. **Scorecard** `[SPEC-VER-06]` once diff mode gives results.
+7. **Speed** (measured 2026-10-31, `Bench.run`, Verilator -O2): Blink 248k, UART TX 188k, quadrature
+   285k, SPI IMU 178k clocks/s; raw `Session.step` 296k (0.2 % of a 125 MHz RP2040). Profile first
+   (per-clock trace kept for every clock, Python per batch, model size); goal set after profiling.
+8. **Measure the competition**: install picoem and headblockhead/pio, run our conformance set, record
+   speed and agreement. "Best" is then a table, not a claim.
 Board items (live board trace, silicon diff, Tang fit) come after these.
 
 ## Blocker: the tile does not fit the Tang boards (found 2026-10-31)

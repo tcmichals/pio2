@@ -506,6 +506,45 @@ class RxCollector(Part):
         self.next = session.cycle + self.every
 
 
+class QuadratureHost(Part):
+    """Host side of pico-examples `quadrature_encoder`: every `every` clocks it does what
+    `quadrature_encoder_get_count()` does: read the RX FIFO level + 1 words (the FIFO is drained,
+    and the last word is a fresh sample, since the program pushes without blocking); `count` is that
+    last word as a signed 32-bit value. pio2 has no FLEVEL register yet ([SPEC-PIO-15]), so the
+    level comes through the debugger."""
+    kind = "quadrature_host"
+
+    def __init__(self, name, sm=0, every=2000):
+        super().__init__(name)
+        self.sm, self.every = sm, every
+        self.params = {"sm": sm, "every": every}
+        self.count = None
+        self.reads = 0
+        self.next = None
+
+    def attach(self, session):
+        super().attach(session)
+        self.next = session.cycle
+
+    def wake(self, cycle):
+        return self.next
+
+    def apply(self, session):
+        if self.next is None or session.cycle < self.next:
+            return
+        n = session.sm_state(self.sm)["rx_level"] + 1
+        w = None
+        for _ in range(n):
+            for _ in range(64):            # pio_sm_get_blocking: the fresh word comes within a few clocks
+                w = session.pull(self.sm)
+                if w is not None:
+                    break
+        if w is not None:
+            self.count = w - (1 << 32) if w & 0x8000_0000 else w
+            self.reads += 1
+        self.next = session.cycle + self.every
+
+
 class UartRxHost(RxCollector):
     """RX FIFO reader for a UART receiver program that leaves each byte in bits [31:24]."""
     kind = "uart_rx_host"
@@ -621,6 +660,13 @@ class EscSerialHost(Part):
             while self.pending and not (session.read(FSTAT) >> (24 + self.sm)) & 1:
                 session.push(self.sm, self.pending.pop(0))
             if not self.pending:
+                self.phase = "drain"
+        elif self.phase == "drain":
+            # The quiet time counts from when the last byte has left the TX FIFO, not from when it
+            # was queued: at 19200 baud four queued bytes are ~56k clocks at 27 MHz, about the whole
+            # quiet window. The CPU would poll FSTAT.TXEMPTY; pio2 has no TXEMPTY bit yet
+            # ([SPEC-PIO-15]), so the host script reads the level through the debugger.
+            if session.sm_state(self.sm)["tx_level"] == 0:
                 self.phase, self.reply, self.t_sent = "wait", bytearray(), session.cycle
         elif self.phase == "wait":
             for _ in range(8):                 # at most one FIFO (8 joined) per visit
@@ -780,6 +826,12 @@ class I2cHost(Part):
                 if op[1]:
                     while s.pull(sm) is not None:
                         pass
+                    # The write left the ISR shift count at 16 (each `in pins, 1` counts while autopush
+                    # is off), so the first `in` after enabling autopush pushes at once and every byte
+                    # comes back one bit out of step. `mov isr, null` resets the count. pio_i2c.c does
+                    # not do this; whether the RP2040 shows the same shift is to be checked on silicon
+                    # ([SPEC-VER-04]).
+                    s.exec(sm, 0xA0C3)                     # mov isr, null
                 self.ops.pop(0)
             elif op[0] == "put":
                 words = op[1]

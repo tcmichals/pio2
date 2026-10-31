@@ -465,3 +465,40 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   (button held, LED lit) and SPI IMU; SpecTrace drift 0, skills 0 problems, verifies 2 (pre-existing).
 * **Not verified**: stimulus generators against their protocols (no test checks DShot replies, I2C,
   SPI IMU sample values); watches other than PC; GUI interactively; cocotb (no RTL changed).
+
+## 2026-10-31: Stimulus checked end to end; five bugs found (host scripts, example config, Bench)
+
+* **Category**: `product-bug` (5), `false-alarm` (one test assumption), `hardware-fact` (to confirm)
+* **What**: `tests/test_debug_stimulus.py` runs each protocol example and compares the host script
+  with the device model: UART RX text, DShot (30 frames, 0 bad CRC, host RPM within 1 % of the ESC's
+  telemetry), ESC serial bootloader exchanges, quadrature count, SPI IMU samples, I2C sensor values,
+  WS2812 colours; watches of every kind (pin, stall, register, FIFO, IRQ); reverse step across a
+  button press. 16 tests with `test_debug_bench.py`; each fix below fails its test when reverted.
+* **Bugs found and fixed**:
+  1. `EscSerialHost` started its 60k-clock quiet timer when the last byte was queued; at 19200 baud /
+     27 MHz four queued bytes are ~56k clocks, so it gave up before the ESC's answer and booked the
+     answer against the next message. The timer now starts when the TX FIFO is empty (read through
+     the debugger: pio2 has no `FSTAT.TXEMPTY`, [SPEC-PIO-15]).
+  2. Quadrature example: `shiftctrl=0` made OUT shift left; the SDK default (kept by
+     `quadrature_encoder_program_init`) shifts OUT right, so `OUT ISR, 2` took OSR[31:30] and the
+     computed jump went astray (Y jumped by dozens per step). Now `OUT_RIGHT`; a `QuadratureHost`
+     reads the count as `quadrature_encoder_get_count()` does (drain level + 1).
+  3. I2C example: every byte came back one bit out of step (0x2232 for 0x1900). The write phase
+     leaves the ISR shift count at 16 (each `in pins, 1` counts while autopush is off); the first `in`
+     after autopush is enabled pushes at once. The host now runs `mov isr, null` when it enables RX.
+  4. `Bench`: a zero-clock action (button press) is logged at the same cycle as the run after it, and
+     `drop_after(cycle)` removed it, so presses were never in the log and reverse step lost them.
+     Now the recorded future is dropped only when acting behind the horizon; running forward after
+     stepping back replays the recorded timeline ([SPEC-DBG-06] "stimulus is replayed").
+  5. `Bench`: a watch that fires inside a register access was reported at its trace cycle while the
+     bench stopped before the access (15 clocks earlier); it now runs through the access and reports
+     the cycle reached.
+* **Hardware fact to confirm (not verified)**: by the RP2040 datasheet autopush rule, pico-examples
+  `pio_i2c.c` (write then read without clearing the ISR) should show the same one-bit shift on
+  silicon. Check with the Pico cross-check ([SPEC-VER-04]) before reporting it upstream.
+* **False alarm (test)**: "true now, false one clock earlier" does not hold when the stall begins
+  inside a register access (the stop is the end of the access); that case got its own test.
+* **Evidence**: `pytest tests` 550 passed, 1 failed (known `test_trace_ctf`); all 13 examples run
+  through `pio2-debug`; SpecTrace drift 0, skills 0, verifies 2 (pre-existing).
+* **Not verified**: watches while replaying recorded history (not checked during a redo);
+  `step_instr` behind the horizon starts a new timeline instead of replaying; GUI interactively.

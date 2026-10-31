@@ -138,6 +138,7 @@ class Bench:
         self.name = None
         self.replaying = False
         self.last_stop = None
+        self.horizon = 0                   # furthest cycle of the current timeline
         if example is not None:
             self.load(example)
 
@@ -161,6 +162,7 @@ class Bench:
         self.history.clear()
         self.history.take(s, self.parts, 0)
         self.last_stop = None
+        self.horizon = s.cycle
         return self.ex
 
     @property
@@ -172,9 +174,21 @@ class Bench:
 
     # ------------------------------------------------------------ user actions (logged)
     def _new_action(self, kind, args=()):
-        if not self.replaying:
+        # An action in the past (behind the horizon) starts a new timeline. At the horizon nothing is
+        # dropped: a zero-clock action (a button press) shares its cycle with the run after it.
+        if not self.replaying and self.s.cycle < self.horizon:
             self.history.drop_after(self.s.cycle)
+            self.horizon = self.s.cycle
         return self.history.record(Action(self.s.cycle, kind, tuple(args)))
+
+    def _redo(self, end):
+        """Behind the horizon (after stepping back), running forward replays the recorded timeline,
+        part actions included ([SPEC-DBG-06]), up to `end` or the horizon. Returns True when `end`
+        was reached. Watches are not checked while replaying."""
+        if self.s.cycle >= self.horizon:
+            return False
+        self.back_to(min(end, self.horizon))
+        return self.s.cycle >= end
 
     def run(self, n):
         """Run n clocks (or until a watch fires: returns a Stop, else None)."""
@@ -183,34 +197,54 @@ class Bench:
     def run_to(self, end):
         if end <= self.s.cycle:
             return None
+        if self._redo(end) or end <= self.s.cycle:
+            return None
         pos = self._new_action("run_to", (end,))
         start = self.s.cycle
         hit = self._run_to(end, pos)
         if hit is None:
+            self.horizon = max(self.horizon, self.s.cycle)
             return None
         # found at hit.cycle: the run ends there; rebuild that cycle exactly
         self.history.log[pos] = Action(start, "run_to", (hit.cycle,))
         self.history.points = [p for p in self.history.points if p.cycle <= hit.cycle]
         if self.s.cycle != hit.cycle:
             self.back_to(hit.cycle)
+            if self.s.cycle < hit.cycle:
+                # a register access straddles the stop: it is checked at the end of the access, so
+                # run through it and report the cycle actually reached
+                self.replaying = True
+                try:
+                    self._run_to(hit.cycle, pos)
+                finally:
+                    self.replaying = False
+                hit = Stop(self.s.cycle, hit.watch, hit.text)
+        self.horizon = self.s.cycle
         self.last_stop = hit
         return hit
 
     def step_clock(self):
+        if self._redo(self.s.cycle + 1):
+            return
         self._new_action("clock")
         self._exec(self.history.log[-1])
+        self.horizon = self.s.cycle
 
     def step_instr(self, sm, limit=10_000):
         """Run until SM `sm` retires one instruction ([SPEC-DBG-03]); parts act every clock.
-        Returns the clocks run (== limit: nothing retired)."""
+        Returns the clocks run (== limit: nothing retired). Behind the horizon this starts a new
+        timeline (not a replay)."""
         if not (self.s._get("sm_en") >> sm) & 1:
             raise SimError(f"SM{sm} is disabled")
         self._new_action("instr", (sm, limit))
-        return self._exec(self.history.log[-1])
+        n = self._exec(self.history.log[-1])
+        self.horizon = self.s.cycle
+        return n
 
     def write(self, off, value):
         self._new_action("write", (off, value))
         self._exec(self.history.log[-1])
+        self.horizon = self.s.cycle
 
     def push(self, sm, word):
         self.write(0x110 + 0x20 * sm, word)
@@ -219,7 +253,9 @@ class Bench:
         """Call a part's method that changes what it does (press a button, send UART bytes, set a
         throttle) as a logged action, so reverse step replays it."""
         self._new_action("part", (name, method, args))
-        return self._exec(self.history.log[-1])
+        r = self._exec(self.history.log[-1])
+        self.horizon = self.s.cycle
+        return r
 
     def _exec(self, a):
         s = self.s

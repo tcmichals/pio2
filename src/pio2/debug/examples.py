@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 
 from pio2.debug import diagram
 from pio2.debug.session import Pins
-from pio2.debug.stimulus import (DShotHost, EscSerialHost, FifoFeeder, I2cHost, ImuHost, RxCollector,
-                                 UartRxHost)
+from pio2.debug.stimulus import (DShotHost, EscSerialHost, FifoFeeder, I2cHost, ImuHost, QuadratureHost,
+                                 RxCollector, UartRxHost)
 
 F_SYS = 125e6
 
@@ -155,8 +155,10 @@ def uart_rx(s):
 def quadrature(s):
     """pico-examples quadrature_encoder on GPIO 10 / 11 (program at address 0, clock divider 1)."""
     a = 10
-    s.load("quadrature_encoder", sm=0, offset=0, pinctrl=Pins(in_base=a), execctrl=a << 24)
-    return from_diagram("quadrature", RxCollector("count", sm=0, every=2000, keep=8))
+    # quadrature_encoder_program_init: SDK default config (OUT shifts right) with IN shifting left
+    s.load("quadrature_encoder", sm=0, offset=0, pinctrl=Pins(in_base=a), execctrl=a << 24,
+           shiftctrl=OUT_RIGHT)
+    return from_diagram("quadrature", QuadratureHost("count", sm=0, every=2000))
 
 
 def spi_imu(s):
