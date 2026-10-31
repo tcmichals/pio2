@@ -75,6 +75,16 @@ To do, in order:
    (register offsets 0x200..0x2FC, key 0xA5, whole-tile swap), then RTL in `asp_pio_tile.sv` with a
    failing cocotb test first, `fpga-fit` cost on 9K / 20K, host API in `src/pio2/host/`, E906 side in
    AbstractX. Makes item 10 a one-word write.
+12. **Switch options to decide, then test on the motor bench** (project owner, 2026-10-31):
+   (a) reload over the link (today), (b) tile preload `[SPEC-PIO-16]` (1 tile, whole-tile swap),
+   (c) **pad swap to another tile**: tile A runs DShot, tile B runs esc_serial, a runtime per-pad
+   owner select moves one motor pin between them (per-motor, no reload; needs a second tile and a new
+   requirement next to `[SPEC-PIO-09]`, whose pin map today fixes one tile per pad; handover: old tile
+   `set pindirs, 0`, pull-up holds the line, switch, new tile takes it). Open: per-motor passthrough
+   needed?  Does the 9K / 20K fit two tiles (`fpga-fit`)?
+   Motor bench: a **Tang Nano 9K one-motor bitstream** (one motor pin, ESC simulator or load, no
+   props) to test (a), (b) and (c) on one ESC: switch time, pin held / no glitch, ESC answers in
+   passthrough, DShot resumes after the swap back. Part of `[SPEC-VER-03]` / `[SPEC-VER-05]`.
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
