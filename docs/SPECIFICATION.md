@@ -214,6 +214,31 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 * **Verified by**: `rtl-lint`, `cocotb-regression`, `fpga-fit`
 * **Implementation Target**: `rtl/asp_top.sv`, board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`
 
+### `[SPEC-PIO-17]` Runtime Pad Owner Select: Lend a Pad to Another Tile (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: for ESC passthrough (motors disarmed) a motor pad is handed to
+  a tile whose normal job is not needed then (NeoPixel, RC PWM decode), reloaded with `esc_serial`;
+  the DShot tile keeps its program and the other motors. No extra tile, no reload of the DShot tile.
+  **Status: proposed, not implemented.**
+* **Requirement (pin map)**: a pad in `hw/<board>/pins.toml` (`[SPEC-PIO-09]`) has its home tile and pin
+  and may list **alternates** (tile, tile pin). Only listed pairs are wired; the mux is built from the
+  pin map, so an unlisted pair cannot be selected.
+* **Requirement (select)**: a pad-owner register per pad with alternates (`OWNER`: 0 = home, n =
+  alternate n) in the core window. The owner drives `out` and `oe`; every tile listed for the pad sees
+  its level on `i_gpio` (so a tile can watch a pad it does not own).
+* **Requirement (handover, no glitch, no contention)**: a write to `OWNER` takes effect only while the
+  pad is released, i.e. both the current and the new owner's `oe` for that pad are 0 (the host first
+  runs `set pindirs, 0` on the old owner; the board pull-up holds the line); otherwise the write is
+  refused and an error bit is set. The new owner then takes the pad with `set pindirs, 1`. The pad is
+  never driven by two tiles.
+* **Requirement**: after reset every pad is owned by its home tile; the disarmed rule of
+  `[SPEC-PIO-11]` applies to lending a motor pad.
+* **Relation**: `[SPEC-PIO-16]` (preload) is then optional for the passthrough case; it stays useful
+  for switching a whole tile in one clock.
+* **Verified by**: `cocotb-regression` (lend motor pad 2 to the LED tile running `esc_serial`, DShot
+  continues on motors 1, 3, 4; refused while either side drives; no clock with two drivers;
+  give it back), `rtl-lint`, `fpga-fit` (mux cost), `board-bringup` (Tang Nano 9K one-motor bench)
+* **Implementation Target**: board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`, `src/rtl/pio2_core_regs.sv`
+
 ### `[SPEC-PIO-11]` Program Library and Loading
 * **Requirement**: programs live as `.pio` sources in `src/programs/`, assembled by the Raspberry
   Pi `pioasm` (Pico SDK 2.1.1); the generated instruction words are checked in next to the source,
