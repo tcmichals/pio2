@@ -1,6 +1,6 @@
 # pio2 TODO and Status
 
-Updated 2026-10-30. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SPECIFICATION.md`,
+Updated 2026-10-31. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SPECIFICATION.md`,
 `docs/DEBUGGER_SPECIFICATION.md`. Lessons: `engineering_log.md`.
 
 ## Where we are
@@ -18,14 +18,14 @@ Updated 2026-10-30. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
-State of `main` (not pushed): tile split, DMA + rings + crossbar + core registers, Icarus as second
+State of `main` (pushed to origin 2026-10-31; both worktree branches pushed too): tile split, DMA + rings + crossbar + core registers, Icarus as second
 simulator, k-induction on both AXI4-Lite front ends are committed. Verilator: 11/11 cocotb suites
 (including the 384-case ISA suite), pytest 442 passed. The Icarus run of the merged tree did not finish
 before the stop: re-run `uv run pio2-cocotb --sim icarus` (the new pio2_core suites have never run on
 Icarus).
 
 Unmerged work, in branches (each has its own commits and a report in its last commit messages):
-* `worktree-agent-a1f543a2c9553e1ee`: **finished, merge next**. `src/pio2/host/frame.py` (link frames,
+* `worktree-agent-a1f543a2c9553e1ee`: **merged 2026-10-31 (db40f9d); spec follow-ups below still open**. `src/pio2/host/frame.py` (link frames,
   CRC32), `src/pio2/trace/ctf.py` + `barectf_config.yaml` (CTF, read back by babeltrace2), `pio2-trac`
   evidence ledger (TODO item 7). Expect conflicts in engineering_log.md (append both) and in the
   spec text it asked for (op-code table is already in [SPEC-LINK-02]; add [SPEC-VER-02] "evidence
@@ -42,14 +42,19 @@ Unmerged work, in branches (each has its own commits and a report in its last co
 How to resume:
 ```bash
 cd /media/tcmichals/projects/pio2
-git log --oneline -8                                     # main: 0d83c24 and earlier
-git merge --no-ff worktree-agent-a1f543a2c9553e1ee       # 1. host frames / CTF / ledger
+git log --oneline -8                                     # main: db40f9d (branch 1 merged)
+# done: worktree-agent-a1f543a2c9553e1ee merged (db40f9d)
 git merge --no-ff worktree-agent-aa5ce2bdeac89fae2       # 4. debugger (conflicts in session.py, pio2sim.cpp)
 export PATH=$HOME/.tools/oss-cad-suite/bin:$PATH
 uv run pytest tests -q && uv run pio2-cocotb && uv run pio2-cocotb --sim icarus
 git worktree remove .claude/worktrees/agent-*            # once merged (use --force if needed)
 ```
 Use `git status --ignore-submodules=all` (plain `git status` / `git stash` hang on this disk).
+Host moved to Ubuntu 26.04 (2026-10-31): system Python is 3.14 and uv was gone; uv 0.13.6 reinstalled
+to `~/.local/bin`, `.venv` rebuilt with `uv sync` (Python 3.12.16). babeltrace2 is not installed, so the
+babeltrace2 is now installed: 7 of 8 CTF tests pass. **Open**: `test_debugger_session_records_to_ctf`
+fails on the merged tree; DROPPED counts sum to less than the drop total (1835 vs 2040), see
+engineering_log.md 2026-10-31. Fix the RTL accounting (or prove it right) before relaxing the test.
 
 Uncommitted-then-committed draft (this commit): **SPI link RTL, untested, not in any build**
 * `src/rtl/link/pio2_spi_phy.sv` (SCK domain, two frame buffers per direction, handover while CS_n

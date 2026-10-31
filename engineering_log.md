@@ -303,3 +303,24 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   real AbstractX matrix shows as VERIFIED 1 / STALE 1 / FAILING 1, then STALE after an impl change);
   mutant (missing skills judged pass) -> 3 failed.
 * **Not verified**: records from a second machine merged with these (file per host, by design).
+
+## 2026-10-31: CTF end-to-end test fails on the merged tree; trace drops under-reported (open)
+
+* **Category**: `product-bug` (suspected, open), `process-gap` (branch test written against the old core)
+* **What**: after merging `worktree-agent-a1f543a2c9553e1ee`, `tests/test_trace_ctf.py::test_debugger_session_records_to_ctf`
+  fails once babeltrace2 is installed (it skipped before). The test was written against the old
+  pio2_core trace record port; main now sends trace on channel 1 of the core's output stream.
+  1. `len(evs) > 2000` fails: 1930 records (threshold was tuned to the old core).
+  2. With that relaxed, `len(dropped) == 1` fails: 46 DROPPED records. That is allowed by
+     [SPEC-TRC-01] (a DROPPED record goes out in any clock with no slot waiting; the IRQ toggler leaves
+     idle clocks), so the "exactly one" check is a test assumption, not a requirement.
+  3. The requirement that does hold is that DROPPED counts add up to the drop total. They do not:
+     sum of DROPPED `data` 1835 vs `trace_counters()` lost 2040; after 500 more clocks with
+     `type_mask = 1 << 0x1F`: 1900 vs 2042. The 142..205 missing losses are not pending counts.
+     Suspects: a DROPPED record itself lost when the FIFO output / stream is back-pressured
+     (`pio2_event_fifo.sv` writes `out_valid` on `take_drop`), or losses counted in
+     `o_dropped_total` that never enter `drop_cnt`.
+* **Evidence**: `uv run pytest tests -q` 492 passed, 1 failed (this test); probe script in the session
+  scratchpad (blink SM 0, `irq set 0 / irq clear 0 [2]` SM 1, 5000 clocks with the reader stalled).
+* **Not verified**: root cause; whether the old core had the same gap (the test never checked the
+  sum); cocotb coverage of DROPPED accounting under output back-pressure.
