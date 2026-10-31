@@ -24,3 +24,6 @@ Every property proves (k-induction) or the bounded check passes at the depth sta
 ## Evidence
 
 The sby summary per block in the commit message.
+
+Ledger: `uv run pio2-trac --record` (add `--formal` / `--lint` for those skills) writes one record per
+requirement to `docs/verification/evidence/`, which the SpecTrace matrix turns into VERIFIED.

@@ -27,3 +27,6 @@ Every suite prints `PASS`; the tool exits non-zero if a suite fails or prints no
 ## Evidence
 
 The summary lines, quoted in the commit message.
+
+Ledger: `uv run pio2-trac --record` (add `--formal` / `--lint` for those skills) writes one record per
+requirement to `docs/verification/evidence/`, which the SpecTrace matrix turns into VERIFIED.

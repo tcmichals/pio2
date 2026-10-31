@@ -1,0 +1,148 @@
+--- !<tag:barectf.org,2020/3/config>
+# Copyright (C) 2026 Tim Michals
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# pio2 trace: barectf 3 configuration of the CTF 1.8 trace the host writes from event FIFO records.
+# @impl [SPEC-TRC-02] docs/INTERCONNECT_SPECIFICATION.md
+#
+# Record ([SPEC-TRC-01]): [15:0] data, [23:16] src, [31:24] type, [63:32] timestamp (wraps; the host
+# extends it to 64 bits). Every event record type has the same four payload members; only the names
+# of the source and data members change with the type (AbstractX `pio_event` names: tile_id, sm_id,
+# event_type, pc). Event record type ids are their order here (barectf assigns them in order);
+# src/pio2/trace/ctf.py (EVENT_TYPES) writes the same types, and tests/test_trace_ctf.py checks the
+# two agree. The PIO type code of each event record type is in its comment. What must match is the
+# event record types, their members and the clock; the packet header and context ctf.py writes are its
+# own (described in the trace's metadata, which every CTF reader follows), not byte-identical to
+# barectf's generated tracer.
+trace:
+  type:
+    native-byte-order: little-endian
+    $field-type-aliases:
+      uint8:
+        class: unsigned-integer
+        size: 8
+      uint16:
+        class: unsigned-integer
+        size: 16
+    clock-types:
+      sys_clk:
+        description: PIO system clock (event FIFO timestamp, extended to 64 bits)
+        frequency: 125000000      # RP2040 nominal; ctf.py writes the real one per board / session
+        $c-type: uint64_t
+    data-stream-types:
+      pio2:
+        $is-default: true
+        $default-clock-type-name: sys_clk
+        event-record-types:
+          pio_event:                # any type code without its own event record type
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - sm_id: uint8
+                - event_type: uint8
+                - data: uint16
+          pio_stall_begin:          # 0x01: SM starts stalling, data = PC
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - sm_id: uint8
+                - event_type: uint8
+                - pc: uint16
+          pio_stall_end:            # 0x02: SM stops stalling, data = PC of the stalled instruction
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - sm_id: uint8
+                - event_type: uint8
+                - pc: uint16
+          pio_irq_set:              # 0x03: IRQ flag set, src = 0xFF, data = flag number
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - src: uint8
+                - event_type: uint8
+                - irq: uint16
+          pio_irq_clear:            # 0x04: IRQ flag cleared
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - src: uint8
+                - event_type: uint8
+                - irq: uint16
+          pio_fifo_full:            # 0x05: FIFO full edge (RX full: data = 1)
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - sm_id: uint8
+                - event_type: uint8
+                - data: uint16
+          pio_fifo_empty:           # 0x06: FIFO empty edge (TX empty: data = 0)
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - sm_id: uint8
+                - event_type: uint8
+                - data: uint16
+          dma_burst_begin:          # 0x08
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - channel: uint8
+                - event_type: uint8
+                - data: uint16
+          dma_burst_done:           # 0x09
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - channel: uint8
+                - event_type: uint8
+                - data: uint16
+          dma_underrun:             # 0x0A
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - channel: uint8
+                - event_type: uint8
+                - data: uint16
+          dma_overrun:              # 0x0B
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - channel: uint8
+                - event_type: uint8
+                - data: uint16
+          dma_trigger:              # 0x0C
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - channel: uint8
+                - event_type: uint8
+                - data: uint16
+          link_frame_error:         # 0x10
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - src: uint8
+                - event_type: uint8
+                - data: uint16
+          pio_dropped:              # 0x1F: DROPPED, data = records lost (saturating)
+            payload-field-type:
+              class: structure
+              members:
+                - tile_id: uint8
+                - src: uint8
+                - event_type: uint8
+                - count: uint16
