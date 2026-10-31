@@ -420,3 +420,48 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   The Zynq-7020 out-of-context run of `pio2_core` (`xc7z020clg400-2`, 4 ns) was stopped during
   synthesis for low memory (~10 GB RAM, ~150 MB free); no Zynq result.
 * **Not verified**: Fmax on any board; the per-construct cost inside `asp_pio_sm`.
+
+## 2026-10-30: Conformance programs stepped in the debugger against the cocotb results
+
+* **Category**: `process-gap` (verification), `false-alarm` (one test timing)
+* **What**: `tests/test_debug_conformance.py` runs every case of
+  `tests/cocotb/test_asp_pio_conformance_cocotb.py` through `pio2.debug.Session`, once with clocks in
+  batches and once stepped by instruction (`step_instr`), with the same register sequence, waits and
+  expected values. As in the cocotb bench every input line reads 0 (new `Session.set_pull(0)`).
+* **False alarm (test)**: the side-set case sampled pin 3 after the enable write returned and saw the
+  pin high for 2 clocks instead of 3. The per-clock trace shows 3: `Session.write` takes 5 clocks and
+  the first instruction runs inside them, later than cocotbext-axi's write returns. The test reads the
+  pin from the trace from the start of the write.
+* **Evidence**: `uv run pytest tests/test_debug_conformance.py -q`: 33 passed.
+* **Not verified**: the cases on a second simulator (Icarus); the comparison runs the same expectations,
+  not a recorded cocotb waveform.
+
+## 2026-10-31: Debugger M3-M7 branch merged (Bench, stimulus, parts, diagrams, reverse step)
+
+* **Category**: `product-bug` (hang, broken callers), `false-alarm` (two test mistakes), `tool-bug` (path)
+* **What**: merged `worktree-agent-aa5ce2bdeac89fae2` (7908888 tested, 99d587f WIP untested) into
+  `main`. Conflicts in `session.py` (C ABI signature table: stream functions from main + snapshot /
+  `set_oe_invert` from the branch, both kept) and `engineering_log.md` (both kept). `pio2sim.cpp`
+  auto-merged and already reads the trace from channel 1 of the core's output stream.
+* **Found and fixed**:
+  - The branch replaced `Example.feed` with host parts run by `pio2.debug.bench.Bench`, but the CLI,
+    the GUI and `tests/test_debug_session.py` still called `ex.feed` (13 example tests failed with
+    `AttributeError`; `pio2-debug` and `pio2-gui` would crash on any example). All three now drive
+    examples through `Bench` (GUI: Step clock / Step instr / button presses as logged `Bench` actions).
+  - **Hang**: `RxCollector` and three other FIFO drains read "until empty"; each read runs clocks, and
+    `quadrature_encoder` pushes every few clocks, so the loop never ended (pytest at 100 % CPU for 10
+    minutes). Each visit now reads at most 8 words (one joined FIFO).
+  - The GUI wiring canvas took the first pin of every part; host parts have no pins (StopIteration).
+  - `betaflight_dir()` only looked in `../flightcode/betaflight`; it now also finds
+    `../quadcopter/betaflight` (`BETAFLIGHT_DIR` still wins).
+* **New tests** `tests/test_debug_bench.py`: step back 5000 clocks gives the same pins and SM registers
+  bit for bit, and running forward repeats them ([SPEC-DBG-06]); a PC breakpoint stops on the clock SM0
+  arrives ([SPEC-DBG-04]). Mutant (replay stops 3 clocks short) fails both.
+* **False alarms (test)**: loading an example already runs ~240 clocks, so "run 2000" did not end at
+  cycle 2000; blink spends 3001 clocks at each of two addresses, so a 1000-clock window saw one PC.
+* **Tool fact**: the GUI needs `uv sync --extra gui` (imgui-bundle, numpy); a plain `uv sync` removes them.
+* **Evidence**: `pytest tests` 536 passed, 1 failed (the known `test_trace_ctf` DROPPED under-count);
+  all 13 examples run 20,000 clocks through `pio2-debug`; `pio2-gui --screenshot` renders Button to LED
+  (button held, LED lit) and SPI IMU; SpecTrace drift 0, skills 0 problems, verifies 2 (pre-existing).
+* **Not verified**: stimulus generators against their protocols (no test checks DShot replies, I2C,
+  SPI IMU sample values); watches other than PC; GUI interactively; cocotb (no RTL changed).

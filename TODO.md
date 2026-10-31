@@ -63,7 +63,7 @@ To do, in order:
 5. **Branch 1 follow-ups**: add [SPEC-VER-02] "evidence ledger", point [SPEC-TRC-02] Verified by at
    tests/test_trace_ctf.py, align [SPEC-DBG-13]; then `uv run pio2-trac --record --formal --lint` on a
    clean tree and commit the ledger; SpecTrace `--check-drift/--check-skills/--check-verifies`.
-6. **Merge the debugger branch** `worktree-agent-aa5ce2bdeac89fae2` (hand-merge `session.py`,
+6. ~~**Merge the debugger branch**~~ (done 2026-10-31, see Simulator first) `worktree-agent-aa5ce2bdeac89fae2` (hand-merge `session.py`,
    `pio2sim.cpp`; 99d587f untested), then the SPI link RTL review (below).
 7. **Diff-mode reference emulator** `[SPEC-DBG-08]`: survey done 2026-10-31 (table in
    `docs/DEBUGGER_SPECIFICATION.md` §2, links in `docs/references.md`; READMEs only, no tool run).
@@ -243,6 +243,22 @@ Next steps, in order:
 6. [ ] AbstractX: wrapper that adds the TLP adapters around the pio2 tile; its TLP-path test moves back
 7. [ ] Evidence ledger for pio2 (trac.py records) so the matrix can show VERIFIED
 8. [ ] Wiki / tutorials and demos (how the PIO works, debugger walkthroughs) once the debugger runs
+
+## Simulator first (project owner, 2026-10-31: make the pio2 simulator / debugger the best)
+
+1. ~~Merge the debugger branch (M3-M7)~~: **done 2026-10-31** (Bench, stimulus, parts, diagrams,
+   snapshots; CLI / GUI / tests moved to `Bench`; reverse step and PC breakpoint tested).
+2. **Test what the branch brought**: stimulus generators against their protocols (DShot ESC reply,
+   I2C sensor, SPI IMU sample bytes, UART RX, ESC serial answers), watches on pin / stall / IRQ /
+   FIFO / registers, reverse step across a part action (button press) ([SPEC-DBG-04], [SPEC-DBG-06],
+   [SPEC-DBG-07]); then a GUI "Back" control on `Bench.back`.
+3. **Diff mode** `[SPEC-DBG-08]`: choose the reference (headblockhead/pio or picoem, Monday item 7),
+   run it on the conformance set, then `src/pio2/debug/diff.py`.
+4. **Finish RP2040 parity** `[SPEC-PIO-15]` (list under "Best PIO by far" item 4).
+5. **Install and speed**: prebuilt simulator model in a wheel (`pip install pio2[gui]`), measured
+   clocks / second per example; a smaller tile (blocker below) simulates faster too.
+6. **Scorecard** `[SPEC-VER-06]` once diff mode gives results.
+Board items (live board trace, silicon diff, Tang fit) come after these.
 
 ## Blocker: the tile does not fit the Tang boards (found 2026-10-31)
 

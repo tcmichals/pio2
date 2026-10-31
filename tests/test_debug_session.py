@@ -6,6 +6,7 @@
 
 import pytest
 
+from pio2.debug.bench import Bench
 from pio2.debug.examples import EXAMPLES, button_led, uart_hello
 from pio2.debug.session import Pins, Session, SimError
 from pio2.parts import Button, Led, Part, UartTerminal
@@ -18,15 +19,10 @@ def s():
     sess.close()
 
 
-def run(sess, ex, clocks, batch=100):
-    for p in ex.parts:
-        p.attach(sess)
-    for _ in range(clocks // batch):
-        if ex.feed:
-            ex.feed(sess)
-        sess.step(batch)
-        for p in ex.parts:
-            p.update(sess)
+def load(sess, example):
+    """An example on a Bench, the run loop the GUI and the CLI use (parts attached)."""
+    b = Bench(session=sess)
+    return b, b.load(example)
 
 
 def test_registers_round_trip_through_axi4lite(s):
@@ -72,9 +68,9 @@ def test_trace_has_no_gaps(s):
 
 
 def test_uart_tx_reaches_the_terminal_1000_chars(s):
-    ex = uart_hello(s)
-    run(s, ex, 1000 * 160 + 2000, batch=160)
-    term = ex.parts[0]
+    b, ex = load(s, uart_hello)
+    b.run(1000 * 160 + 2000)
+    term = next(p for p in ex.parts if isinstance(p, UartTerminal))
     assert isinstance(term, UartTerminal) and isinstance(term, Part)
     assert term.framing_errors == 0
     msg = "Hello from the pio2 RTL!\r\n"
@@ -83,10 +79,10 @@ def test_uart_tx_reaches_the_terminal_1000_chars(s):
 
 
 def test_button_drives_led_through_mov_pins(s):
-    ex = button_led(s)
-    btn, led = ex.parts
-    assert isinstance(btn, Button) and isinstance(led, Led)
-    run(s, ex, 200)
+    b, ex = load(s, button_led)
+    btn = next(p for p in ex.parts if isinstance(p, Button))
+    led = next(p for p in ex.parts if isinstance(p, Led))
+    b.run(200)
     assert not led.on
     btn.set(s, True)
     run_more = 50
@@ -145,6 +141,6 @@ def test_step_instr_runs_one_clock_at_divider_1(s):
 
 @pytest.mark.parametrize("name", list(EXAMPLES))
 def test_every_example_runs_headless(s, name):
-    ex = EXAMPLES[name](s)
-    run(s, ex, 5000)
-    assert s.cycle > 5000
+    b, ex = load(s, name)
+    b.run(5000)
+    assert s.cycle >= 5000

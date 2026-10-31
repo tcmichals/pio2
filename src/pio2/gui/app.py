@@ -16,7 +16,8 @@ import numpy as np
 from imgui_bundle import hello_imgui, imgui, immapp, implot
 
 from pio2.debug.examples import EXAMPLES
-from pio2.debug.session import Session
+from pio2.debug.bench import Bench
+from pio2.debug.session import SimError
 
 ImVec2, ImVec4 = imgui.ImVec2, imgui.ImVec4
 
@@ -94,7 +95,8 @@ def stall_reason(text, st):
 
 class App:
     def __init__(self, example="Blink"):
-        self.s = Session()
+        self.b = Bench()                    # the one run loop (parts, stimulus, history)
+        self.s = self.b.s
         self.example_name = example
         self.running = True
         self.speed = 200                    # clocks per frame
@@ -106,19 +108,12 @@ class App:
 
     # ------------------------------------------------------------ model
     def load_example(self, name):
-        self.s.reset()
         self.example_name = name
-        self.ex = EXAMPLES[name](self.s)
+        self.ex = self.b.load(name)
         self.speed, self.window = self.ex.speed, self.ex.window
-        for p in self.ex.parts:
-            p.attach(self.s)
 
-    def advance(self, n, feed=True):
-        if feed and self.ex.feed:            # stimulus uses register accesses, which run clocks
-            self.ex.feed(self.s)
-        self.s.step(n)
-        for p in self.ex.parts:
-            p.update(self.s)
+    def advance(self, n):
+        self.b.run(n)
 
     def frame(self):
         if self.running:
@@ -132,17 +127,15 @@ class App:
         imgui.same_line()
         imgui.begin_disabled(self.running)
         if imgui.button("Step clock"):
-            self.advance(1, feed=False)       # exactly one clock
+            self.b.step_clock()               # exactly one clock
         imgui.same_line()
         if imgui.button(f"Step instr SM{self.sel_sm}"):
-            if s.sm_state(self.sel_sm)["enabled"]:
-                n = s.step_instr(self.sel_sm, limit=STEP_LIMIT)
+            try:
+                n = self.b.step_instr(self.sel_sm, limit=STEP_LIMIT)
                 self.step_note = (f"SM{self.sel_sm} still stalled after {n:,} clocks (nothing retired)"
                                   if n >= STEP_LIMIT else "")
-            else:
+            except SimError:
                 self.step_note = f"SM{self.sel_sm} is disabled"
-            for p in self.ex.parts:
-                p.update(s)
         imgui.end_disabled()
         imgui.same_line()
         if imgui.button("Reset"):
@@ -334,14 +327,15 @@ class App:
         # parts in a column to the right, wired to their pins
         px = cx + chip_w + 190
         py = cy + 10
-        for part in self.ex.parts:
+        wired = [p for p in self.ex.parts if p.pins]      # host scripts (FIFO feeders) have no pins
+        for part in wired:
             pin = next(iter(part.pins.values()))
             sx, sy = pin_pos[pin]
             sx += 14 if pin >= 16 else -14
             target = ImVec2(px, py + 30)
             if pin < 16:                       # left pins: out past the labels, over the chip, to the part
-                lane = self.ex.parts.index(part)
-                nlanes = len(self.ex.parts)
+                lane = wired.index(part)
+                nlanes = len(wired)
                 left = p0.x + 18 + 12 * lane            # nested lanes: no two wires cross
                 top = cy - 26 - 12 * (nlanes - 1 - lane)
                 pts = [ImVec2(sx, sy), ImVec2(left, sy), ImVec2(left, top), ImVec2(px - 40 - 12 * lane, top),
@@ -369,9 +363,9 @@ class App:
                 imgui.set_cursor_screen_pos(ImVec2(px + 12, py + 10))
                 imgui.invisible_button(f"##{part.name}", ImVec2(44, 40))
                 if imgui.is_item_activated():
-                    part.set(s, True)
+                    self.b.part_call(part.name, "set", True)
                 elif imgui.is_item_deactivated():
-                    part.set(s, False)
+                    self.b.part_call(part.name, "set", False)
                 pressed = part.pressed
                 c = ACCENT if pressed else (0.3, 0.32, 0.38)
                 dl.add_rect_filled(ImVec2(px + 14, py + 14), ImVec2(px + 54, py + 46),
@@ -522,7 +516,7 @@ def main():
     if a.press:
         for p in app.ex.parts:
             if p.kind == "button":
-                p.set(app.s, True)
+                app.b.part_call(p.name, "set", True)
     while a.warmup > 0:
         k = min(a.warmup, app.speed)
         app.advance(k)

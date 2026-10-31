@@ -1,0 +1,32 @@
+{
+  "pio2_diagram": 1,
+  "title": "Blink: LED on GPIO 25",
+  "about": "pico-examples pio_blink: SET pins drives the LED; the TX FIFO word is the delay.",
+  "reference": "Wokwi Pi Pico 'pio_blink' runs the same program: the LED toggles every delay + 3 SM clocks (here 3003 clocks = 24 us at 125 MHz; the original uses a much longer delay).",
+  "parts": [
+    {
+      "type": "led",
+      "name": "LED",
+      "pins": {
+        "pin": 25
+      },
+      "attrs": {
+        "color": [
+          1.0,
+          0.25,
+          0.2
+        ]
+      }
+    }
+  ],
+  "probes": [
+    25
+  ],
+  "labels": {
+    "25": "LED"
+  },
+  "view": {
+    "speed": 100,
+    "window": 15000
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "pio2_diagram": 1,
+  "title": "Bidirectional DShot600 on GPIO 4, ESC + motor",
+  "about": "dshot_bidir.pio: 16 bits out, the line released, the ESC's GCR eRPM reply sampled; the flight-controller script decodes it with pio2.dshot_ref. The motor follows the throttle.",
+  "parts": [
+    {
+      "type": "esc",
+      "name": "ESC",
+      "pins": {
+        "pin": 4
+      },
+      "attrs": {
+        "mode": "dshot",
+        "dshot_bit_clocks": 208.3125,
+        "reply_delay_clocks": 3750,
+        "poles": 14,
+        "max_rpm": 30000,
+        "tau_clocks": 2000000,
+        "f_sys": 125000000
+      }
+    }
+  ],
+  "probes": [
+    4
+  ],
+  "labels": {
+    "4": "MOTOR"
+  },
+  "view": {
+    "speed": 1000,
+    "window": 16000
+  },
+  "reference": ""
+}

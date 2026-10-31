@@ -1,0 +1,42 @@
+{
+  "pio2_diagram": 1,
+  "title": "Button to LED: GPIO 14 to GPIO 15",
+  "about": "One instruction, `mov pins, ~pins`: the IN window starts at the button, the OUT window at the LED. Hold the button.",
+  "parts": [
+    {
+      "type": "button",
+      "name": "Button",
+      "pins": {
+        "pin": 14
+      },
+      "attrs": {}
+    },
+    {
+      "type": "led",
+      "name": "LED",
+      "pins": {
+        "pin": 15
+      },
+      "attrs": {
+        "color": [
+          0.2,
+          0.9,
+          0.4
+        ]
+      }
+    }
+  ],
+  "probes": [
+    14,
+    15
+  ],
+  "labels": {
+    "14": "BTN",
+    "15": "LED"
+  },
+  "view": {
+    "speed": 50,
+    "window": 3000
+  },
+  "reference": ""
+}

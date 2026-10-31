@@ -1,0 +1,28 @@
+{
+  "pio2_diagram": 1,
+  "title": "UART TX: terminal on GPIO 0",
+  "about": "pico-examples uart_tx: OUT pins and an optional side-set on the same line, 8 SM clocks per bit; a host script keeps the TX FIFO filled with a message.",
+  "reference": "Wokwi Pi Pico uart_tx example: the same 8N1 frame (start, 8 data LSB first, stop).",
+  "parts": [
+    {
+      "type": "terminal",
+      "name": "Terminal",
+      "pins": {
+        "rx": 0
+      },
+      "attrs": {
+        "clocks_per_bit": 16
+      }
+    }
+  ],
+  "probes": [
+    0
+  ],
+  "labels": {
+    "0": "TX"
+  },
+  "view": {
+    "speed": 160,
+    "window": 1800
+  }
+}

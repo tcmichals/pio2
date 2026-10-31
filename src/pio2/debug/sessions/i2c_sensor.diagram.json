@@ -1,0 +1,37 @@
+{
+  "pio2_diagram": 1,
+  "title": "I2C temperature sensor on GPIO 4 / 5",
+  "about": "pico-examples i2c (100 kHz, open drain through the inverted output enable): a host script reads the 2-byte temperature register of a TMP102-like sensor at 0x48.",
+  "parts": [
+    {
+      "type": "i2c_sensor",
+      "name": "Sensor",
+      "pins": {
+        "sda": 4,
+        "scl": 5
+      },
+      "attrs": {
+        "address": 72,
+        "who_am_i_reg": 15,
+        "who_am_i": 165,
+        "data_reg": 0,
+        "odr_clocks": 50000,
+        "latency": 64,
+        "idle_horizon": 256
+      }
+    }
+  ],
+  "probes": [
+    4,
+    5
+  ],
+  "labels": {
+    "4": "SDA",
+    "5": "SCL"
+  },
+  "view": {
+    "speed": 2000,
+    "window": 40000
+  },
+  "reference": ""
+}

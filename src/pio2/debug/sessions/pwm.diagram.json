@@ -1,0 +1,33 @@
+{
+  "pio2_diagram": 1,
+  "title": "PWM: LED brightness on GPIO 25",
+  "about": "pico-examples pio/pwm: period 99 in the ISR (set by SMx_INSTR), level 25 through the TX FIFO; the LED shows the duty cycle (~25 %).",
+  "parts": [
+    {
+      "type": "led",
+      "name": "LED",
+      "pins": {
+        "pin": 25
+      },
+      "attrs": {
+        "color": [
+          0.3,
+          0.6,
+          1.0
+        ],
+        "window": 3060
+      }
+    }
+  ],
+  "probes": [
+    25
+  ],
+  "labels": {
+    "25": "PWM"
+  },
+  "view": {
+    "speed": 200,
+    "window": 1500
+  },
+  "reference": ""
+}

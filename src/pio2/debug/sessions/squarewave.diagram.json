@@ -1,0 +1,28 @@
+{
+  "pio2_diagram": 1,
+  "title": "Square wave on GPIO 0",
+  "about": "pico-examples hello squarewave: set pins 1 [1], set pins 0, jmp: 4 SM clocks per period at clock divider 2.5 = 10 system clocks (12.5 MHz at 125 MHz). The probe measures it.",
+  "reference": "Wokwi Pi Pico squarewave: same 4-cycle loop; there the divider is also 2.5.",
+  "parts": [
+    {
+      "type": "probe",
+      "name": "Probe",
+      "pins": {
+        "pin": 0
+      },
+      "attrs": {
+        "f_sys": 125000000
+      }
+    }
+  ],
+  "probes": [
+    0
+  ],
+  "labels": {
+    "0": "SQW"
+  },
+  "view": {
+    "speed": 50,
+    "window": 200
+  }
+}

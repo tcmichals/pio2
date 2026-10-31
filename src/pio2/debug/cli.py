@@ -13,6 +13,7 @@ import json
 import sys
 
 from pio2.debug.examples import EXAMPLES
+from pio2.debug.bench import Bench
 from pio2.debug.session import Session
 
 
@@ -31,18 +32,9 @@ def main():
         print(f"unknown example {a.example!r}; --list shows them", file=sys.stderr)
         return 2
     with Session() as s:
-        ex = EXAMPLES[a.example](s)
-        for p in ex.parts:
-            p.attach(s)
-        left = a.clocks
-        while left > 0:
-            k = min(left, ex.speed)
-            if ex.feed:
-                ex.feed(s)
-            s.step(k)
-            for p in ex.parts:
-                p.update(s)
-            left -= k
+        bench = Bench(session=s)
+        ex = bench.load(a.example)
+        bench.run(a.clocks)
         print(f"{ex.title}: {s.cycle} clocks")
         for sm, (p, _) in s.programs.items():
             st = s.sm_state(sm)

@@ -40,7 +40,13 @@ BF_C = {   # program name -> (file, array name, wrap_target, wrap, sideset {size
 
 
 def betaflight_dir() -> Path:
-    return Path(os.environ.get("BETAFLIGHT_DIR", ROOT.parent / "flightcode" / "betaflight"))
+    """BETAFLIGHT_DIR, else the first sibling checkout found (flightcode/ or quadcopter/)."""
+    if "BETAFLIGHT_DIR" in os.environ:
+        return Path(os.environ["BETAFLIGHT_DIR"])
+    for d in (ROOT.parent / "flightcode" / "betaflight", ROOT.parent / "quadcopter" / "betaflight"):
+        if (d / "src" / "platform" / "PICO").is_dir():
+            return d
+    return ROOT.parent / "flightcode" / "betaflight"
 
 
 def rtfc_dir() -> Path:
