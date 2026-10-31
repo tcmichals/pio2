@@ -39,9 +39,12 @@ To do, in order:
    against the old trace port. `len(evs) > 2000` (now 1930) and "exactly one DROPPED record" (now 46,
    allowed by [SPEC-TRC-01]) are stale assumptions; check sum(DROPPED) == lost and the CTF
    discarded-events count == lost instead. Do not relax it before 1 is understood.
-3. **Icarus cocotb on the merged tree**: `uv run pio2-cocotb --sim icarus` (run of 2026-10-31 not
-   finished at handoff; the pio2_core suites have never run on Icarus). Then a full `uv run pio2-cocotb`
-   with the waiver fix.
+3. **Icarus cocotb on the merged tree** (run 2026-10-31, oss-cad-suite Icarus 14.0 devel): 8 suites
+   PASS (incl. ISA 384/384); `test_pio2_axil_regs_cocotb` 1/3 (`random_traffic_with_stalls_1000`,
+   `partial_write_is_slverr_without_effect`: `int(dut.o_raddr.value)` on X; test samples outside a
+   valid read, or the RTL leaves `o_raddr` X when idle: decide, fix, test fails on old code);
+   `test_pio2_core_cocotb` hung (no result after 900 s, `--timeout`); `test_pio2_dma_cocotb` not run.
+   Verilator is 2-state, so X problems only show here. Then a full `uv run pio2-cocotb` with the waiver.
 4. **Unanswered**: why the 2026-10-30 handoff recorded Verilator 11/11 with the same binary
    (oss-cad-suite Verilator 5.049, installed 2026-06-14) that now needs the UNOPTFLAT waiver.
 5. **Branch 1 follow-ups**: add [SPEC-VER-02] "evidence ledger", point [SPEC-TRC-02] Verified by at
@@ -82,6 +85,11 @@ To do, in order:
    handover only while both sides have `oe` = 0. One motor at a time, disarmed (confirmed in the
    configurator 2026-10-31: no DShot panel while passthrough_active); DShot tile stopped but not
    reloaded; no extra tile.
+   Betaflight (checkout `../quadcopter/betaflight`, d593400a0): `esc4wayInit()` (`src/main/io/serial_4way.c:139`)
+   calls `motorDisable()` and switches **all** motor lines to inputs held high; the 4-way protocol then
+   selects one ESC per command. `MSP_SET_PASSTHROUGH` itself has no ARMED check; arming is blocked by
+   `MSP_SET_ARMING_DISABLED` (99), which the Python configurator never sends (finding for the
+   configurator repo, not fixed). rt-fc-offloader (reference for `[SPEC-PIO-13]`) is not on this PC.
    Leaning (c) for passthrough; (b) optional. Next: per-board tile allocation (which tile runs DShot,
    LED, PWM, IMU) written down for 9K / 20K; `fpga-fit` mux cost.
    Motor bench: a **Tang Nano 9K one-motor bitstream** (one motor pin, ESC simulator or load, no

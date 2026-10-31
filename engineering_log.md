@@ -350,3 +350,19 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Evidence**: `git ls-remote origin zynq-ring-dma` = e856f246...; `git merge-base --is-ancestor
   e856f24 main` = yes after the merge.
 * **Not verified**: a clean AbstractX clone + `git submodule update --init rtl/pio` after the push.
+
+## 2026-10-31: Icarus shows X problems Verilator hides; Betaflight passthrough facts
+
+* **Category**: `product-bug` or test bug (open), `hardware-fact`
+* **What (Icarus)**: first full Icarus run of the merged tree: 8 suites pass (ISA 384/384), but
+  `test_pio2_axil_regs_cocotb` fails 2 of 3 with `ValueError: Can't convert LogicArray to int: it
+  contains non-0/1 values` on `dut.o_raddr` (line 53), `test_pio2_core_cocotb` hangs (900 s timeout),
+  `test_pio2_dma_cocotb` did not run. Verilator is 2-state, so it never sees X. Root cause not found.
+* **What (Betaflight, d593400a0)**: `esc4wayInit()` disables motors and makes every motor line an input
+  held high; one ESC is selected per 4-way command. `MSP_SET_PASSTHROUGH` does not check ARMED; the
+  configurator (e301160) does not send `MSP_SET_ARMING_DISABLED` (99), it relies on `motorDisable()`.
+  Consistent with `[SPEC-PIO-13]` (disarmed, other wires input, one ESC at a time).
+* **Evidence**: `uv run pio2-cocotb --sim icarus` log (session scratchpad); `serial_4way.c:139-158`,
+  `msp.c:293-350`, `msp.c:4150-4170`; configurator `ui_main.py:517`, `async_worker.py:297-333`.
+* **Not verified**: why `o_raddr` is X; whether pio2_core hangs or is only slow on Icarus;
+  rt-fc-offloader reference RTL (not on this PC).
