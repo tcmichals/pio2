@@ -425,3 +425,46 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 
 * **Verified by**: `cocotb-regression` (rows marked done), review of this table against the datasheet
 * **Implementation Target**: `src/rtl/asp_pio_sm.sv`, `src/rtl/asp_pio_tile.sv`
+
+### `[SPEC-PIO-18]` Instruction Memory Pages (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: lift the PIO's best-known limit, 32 instruction words per
+  block (`dshot_bidir` + `esc_serial` = 54 do not fit), without changing the RP2040 encoding.
+  **Status: proposed, not implemented.**
+* **Requirement**: build parameter `IMEM_WORDS` = 32 (default, RP2040-exact), 64 or 128. Each SM has
+  a `PAGE` field (pio2 window; offset fixed in the `[SPEC-PIO-05]` review, not inside `0x200 .. 0x2FC`
+  of `[SPEC-PIO-16]`); the SM fetches from `PAGE * 32 + PC`. PC, JMP targets, `WRAP_TOP` /
+  `WRAP_BOTTOM`, `out pc` and `mov pc` stay 5 bits and stay inside the page, so every pioasm image
+  loads unchanged at an offset inside a page.
+* **Requirement**: `0x10 .. 0x8C` is page 0 (RP2040 map unchanged); the other pages are written
+  through the pio2 window. `PAGE` is written only while the SM is disabled (otherwise refused, error
+  bit set).
+* **Use**: `dshot_bidir` on page 0 and `esc_serial` on page 1 of one tile; switching a motor SM is a
+  `PAGE` write and a restart, no reload (`[SPEC-VER-05]`), one tile instead of two.
+* **Verified by**: `cocotb-regression` (ISA suite unchanged at 32 and 64; two programs resident on two
+  pages, jumps and wrap stay in the page, `PAGE` write refused while enabled), `rtl-lint`, `fpga-fit`
+  (cost at 64 and 128 words on 9K / 20K)
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`, `src/rtl/asp_pio_sm.sv`
+
+### `[SPEC-PIO-19]` FIFO Depth as a Build Parameter (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: fewer host / DMA wake-ups per byte than the RP2040's 4-word
+  FIFOs. **Status: proposed, not implemented.**
+* **Requirement**: build parameter `FIFO_DEPTH` = 4 (default, RP2040-exact), 8 or 16 per direction;
+  joining (`FJOIN`) doubles it as on the RP2040. Full / empty, `mov status` thresholds and the
+  AXI-Stream FIFO ports (`[SPEC-ICN-09]`) follow the built depth; the level fields (`FLEVEL`, missing
+  today, `[SPEC-PIO-15]`) are wide enough for it, and a status register reports the built depth.
+* **Verified by**: `cocotb-regression` (full / empty / join / `mov status` at 4 and 16), `fpga-fit`
+* **Implementation Target**: `src/rtl/asp_pio_sm.sv`
+
+### `[SPEC-PIO-20]` Half-Clock Output Edges (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: the FPGA fabric runs at 27 - 54 MHz on the Tang boards, below
+  the RP2040's 125 MHz, so a fractional divider places edges with up to one fabric clock of jitter.
+  Halve it. **Status: proposed, not implemented.**
+* **Requirement**: build option plus a per-SM enable bit (off after reset: RP2040 behaviour). When on,
+  a pin write from an SM tick whose ideal time (from the divider's fractional phase) falls in the
+  second half of the fabric clock changes the pad half a clock later, through the vendor DDR output
+  register; every output edge is then within half a fabric clock of its ideal time. Inputs and
+  instruction timing are unchanged.
+* **Verified by**: `cocotb-regression` (edge times against ideal at dividers 2.5 and 3.333, off gives
+  today's edges), `fpga-fit` (DDR primitive on 9K / 20K, timing), `board-bringup` (edges on a scope or
+  logic analyzer)
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`, board tops under `hw/`

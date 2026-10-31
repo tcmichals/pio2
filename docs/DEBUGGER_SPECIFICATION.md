@@ -251,6 +251,38 @@ flowchart TB
 * **Verified by**: `host-tests` (`tests/test_asm.py`: oracle over all images; error cases)
 * **Implementation Target**: `src/pio2/asm.py`, `src/pio2/gui/app.py`
 
+### `[SPEC-DBG-17]` Live Board Trace in the Debugger (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: be the PIO debugger that shows a **running board** per clock,
+  not only a model. No surveyed tool does this (section 2). **Status: proposed, not implemented.**
+* **Requirement**: with the `board` back end (`[SPEC-DBG-12]`), the `[SPEC-TRC-03]` / `[SPEC-TRC-04]`
+  records streamed from the FPGA (DMA ring 1, `[SPEC-TRC-02]`) fill the same Timeline, Trace window
+  and PC plot as a simulation, live, at least while the link keeps up; lost records show as `DROPPED`
+  gaps, never as silence.
+* **Requirement (side by side)**: the same session run on the board and in simulation can be shown on
+  one time axis (aligned on the first enable), and the first record where they differ is marked.
+* **Requirement**: a capture can be stopped on a trigger (record type, SM, PC) and saved as CTF
+  (`[SPEC-DBG-13]`), then replayed offline in the same windows.
+* **Verified by**: `host-tests` (replay of a recorded board CTF fills the windows; sim-vs-board
+  alignment and first-difference marker on a seeded difference), `board-bringup` (Tang Nano 20K:
+  blink and DShot traced live)
+* **Implementation Target**: `src/pio2/debug/backends/`, `src/pio2/gui/`
+
+### `[SPEC-DBG-18]` Three-Way Diff: RTL, Reference Emulator, RP2040 Silicon (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: make pio2 the PIO others are checked against: one command runs
+  a program and its stimulus on the RTL (Verilator), on the reference emulator (`[SPEC-DBG-08]`) and
+  on a Pico (`[SPEC-VER-04]` firmware), and reports the first clock where any two disagree.
+  **Status: proposed, not implemented.**
+* **Requirement**: the three pin traces are aligned on the first enable and compared at SM clock
+  resolution (divider applied); the report names the clock, the pin, the pair that disagrees and the
+  instruction each model executed; the RTL and emulator columns also compare PC, X / Y, ISR / OSR and
+  FIFO levels.
+* **Requirement**: the conformance set (`[SPEC-PIO-14]`, the ISA cases of `[SPEC-PIO-02]`) runs
+  three-way as one batch; the result feeds the scorecard (`[SPEC-VER-06]`). Every RTL-vs-silicon
+  difference becomes a failing cocotb test before the fix.
+* **Verified by**: `host-tests` (seeded difference in each pair found at the right clock),
+  `board-bringup` (batch against a real Pico)
+* **Implementation Target**: `src/pio2/debug/diff.py`, `tools/hil/compare.py`
+
 ## 5. Milestones
 
 | M | Content | Done when |

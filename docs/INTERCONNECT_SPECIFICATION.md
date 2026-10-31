@@ -432,6 +432,7 @@ AXI4-Lite crossbar, like every other block.
   | `0x01` / `0x02` | SM stall begin / end (`data`: reason, PC) | `0x08` / `0x09` | DMA burst begin / done |
   | `0x03` / `0x04` | IRQ flag set / clear | `0x0A` / `0x0B` | DMA underrun / overrun |
   | `0x05` / `0x06` | FIFO full / empty edge | `0x0C` | DMA trigger |
+  | `0x0D` / `0x0E` | pin rise / fall (`[SPEC-TRC-04]`, proposed) | | |
   | `0x10` | link frame error | `0x1F` | `DROPPED` (`data` = records lost, saturating) |
 
   Per-instruction events exist in simulation only (`[SPEC-DBG-13]`): at full speed they would fill the
@@ -472,6 +473,21 @@ AXI4-Lite crossbar, like every other block.
 * **Verified by**: `host-tests` (`tests/test_trace.py`: blink's stall on pull, IRQ set / clear,
   FIFO edges, timestamps against the per-clock trace)
 * **Implementation Target**: `src/rtl/trace/pio2_trace_tap.sv`, `src/rtl/pio2_core.sv`, `src/rtl/asp_pio_tile.sv`
+
+### `[SPEC-TRC-04]` Pin Edge Capture With Timestamps (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: measure input edges in hardware with the trace clock, so the
+  host can decode timing (bidirectional DShot eRPM reply, RC PWM, protocol debug on a board) without
+  oversampling in PIO code. Edges only: no protocol logic (`[SPEC-PIO-00]`).
+  **Status: proposed, not implemented.**
+* **Requirement**: a host-written pin mask selects up to 32 tile pins; each rising / falling edge of a
+  selected pin (after the input synchroniser) is a record, type `0x0D` / `0x0E`, `src` = pin, `data` =
+  the levels of all selected pins, timestamp = the clock of the edge minus the fixed synchroniser
+  latency (stated, and corrected by the host as `TAP_LATENCY`). Edges faster than the FIFO drains are
+  dropped and counted (`[SPEC-TRC-01]`).
+* **Verified by**: `cocotb-regression` (edges at known clocks give records at the stated latency;
+  burst beyond FIFO rate gives a correct `DROPPED` count), `host-tests` (CTF field layout,
+  `[SPEC-TRC-02]`)
+* **Implementation Target**: `src/rtl/trace/pio2_pin_tap.sv`, `src/rtl/pio2_core.sv`
 
 ### `[SPEC-TRC-02]` Records Become barectf CTF on the Host
 * **Requirement (path, project owner 2026-10-29)**: the trace goes through the DMA engine like any other
@@ -699,3 +715,15 @@ AXI4-Lite crossbar, like every other block.
   does not).
 * **Verified by**: `board-bringup`, `fpga-fit` (two tiles on the Tang Nano 20K)
 * **Implementation Target**: `src/pio2/host/`, `tools/hil/`
+
+### `[SPEC-VER-06]` Public Conformance Scorecard (pio2 Extension)
+* **Goal (project owner, 2026-10-31)**: show, not claim, that pio2 is the most thoroughly checked PIO:
+  one generated page per release. **Status: proposed, not implemented.**
+* **Requirement**: `pio2-trac` (evidence ledger) generates `docs/scorecard.md` from recorded runs
+  only: ISA cases passed / total (`[SPEC-PIO-02]`), the `[SPEC-PIO-15]` parity table with its done /
+  partial / missing counts, formal proofs closed (`[SPEC-VER-01]`), conformance programs passing
+  (`[SPEC-PIO-14]`), three-way diff results against silicon (`[SPEC-DBG-18]`), each with the commit,
+  date and simulator. A row with no recorded run says NOT RUN; nothing is typed by hand.
+* **Verified by**: `host-tests` (scorecard from a fixture ledger; a missing run shows NOT RUN)
+* **Implementation Target**: `src/pio2/trac.py`
+
