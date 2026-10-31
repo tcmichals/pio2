@@ -2,3 +2,6 @@
 // Lint is for our RTL; third-party blocks (Forencich verilog-axi / verilog-axis) are used unmodified
 // ([SPEC-AXI-05]) and their warnings (ASCRANGE, CASEINCOMPLETE, ...) are not ours to fix.
 lint_off -file "*/third_party/*"
+// UNOPTFLAT is not covered by the rule-less line above: Forencich priority_encoder.v's per-stage
+// arrays (stage_valid / stage_enc) read as one circular signal; it is not a real loop.
+lint_off -rule UNOPTFLAT -file "*/third_party/*"

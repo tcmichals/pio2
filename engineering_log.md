@@ -324,3 +324,15 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   scratchpad (blink SM 0, `irq set 0 / irq clear 0 [2]` SM 1, 5000 clocks with the reader stalled).
 * **Not verified**: root cause; whether the old core had the same gap (the test never checked the
   sum); cocotb coverage of DROPPED accounting under output back-pressure.
+
+## 2026-10-31: Verilator UNOPTFLAT in Forencich priority_encoder stops the pio2_core / pio2_dma builds
+
+* **Category**: `tool-bug` (waiver gap), `false-alarm` (the loop is not real)
+* **What**: `uv run pio2-cocotb` failed to build test_pio2_core_cocotb and test_pio2_dma_cocotb:
+  `%Warning-UNOPTFLAT` on `priority_encoder.v` `stage_valid` / `stage_enc` (via `pio2_dma.u_out_mux`),
+  "Exiting due to 2 warning(s)". `src/rtl/third_party.vlt` had only `lint_off -file "*/third_party/*"`,
+  which does not cover UNOPTFLAT. Added `lint_off -rule UNOPTFLAT -file "*/third_party/*"`.
+* **Evidence**: before: both suites "did not build or run"; after: pio2_core 6/6, pio2_dma 9/9
+  (Verilator 5.049, oss-cad-suite).
+* **Not verified**: why the 2026-10-30 handoff recorded 11/11 on the same binary; full Verilator and
+  Icarus runs with the fix.

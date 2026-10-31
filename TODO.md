@@ -16,6 +16,40 @@ Updated 2026-10-31. Specs: `docs/SPECIFICATION.md` (tile), `docs/INTERCONNECT_SP
 | Tang Nano 9K / 20K tops | still in AbstractX (they build AbstractX's whole `asp_top`) |
 | AbstractX integration | submodule `rtl/pio`; AbstractX 16/16 cocotb, Tang Nano 20K synthesis ok |
 
+## Monday (handoff 2026-10-31)
+
+Done 2026-10-31: `main` and both worktree branches pushed to origin; branch 1
+(`worktree-agent-a1f543a2c9553e1ee`: host frames, CTF, pio2-trac) merged as db40f9d; uv reinstalled and
+`.venv` rebuilt after the Ubuntu 26.04 upgrade; babeltrace2 installed; Verilator build fix
+(`src/rtl/third_party.vlt`: `lint_off -rule UNOPTFLAT` for third_party; the rule-less line does not
+cover it, Forencich `priority_encoder.v` false loop stopped the pio2_core and pio2_dma builds).
+
+Evidence: pytest 492 passed, 1 failed; Verilator cocotb: 9 suites passed in the full run, pio2_core
+6/6 and pio2_dma 9/9 after the waiver fix (full Verilator run with the fix not yet done).
+
+To do, in order:
+1. **Trace DROPPED under-count (suspected product bug, [SPEC-TRC-01])**. DROPPED records sum to fewer
+   losses than the drop counter: 1835 vs 2040 (1900 vs 2042 after 500 more clocks with only DROPPED
+   kept), so it is not just pending counts. Suspects in `src/rtl/trace/pio2_event_fifo.sv`: a DROPPED
+   record lost when the output is back-pressured (`out_valid` on `take_drop`), or drops counted in
+   `o_dropped_total` but not in `drop_cnt`. Write a cocotb test on pio2_event_fifo with output
+   back-pressure that checks sum(DROPPED.data) == total and fails on the current code, then fix.
+   Details: engineering_log.md 2026-10-31.
+2. **Fix `tests/test_trace_ctf.py::test_debugger_session_records_to_ctf`** after 1: it was written
+   against the old trace port. `len(evs) > 2000` (now 1930) and "exactly one DROPPED record" (now 46,
+   allowed by [SPEC-TRC-01]) are stale assumptions; check sum(DROPPED) == lost and the CTF
+   discarded-events count == lost instead. Do not relax it before 1 is understood.
+3. **Icarus cocotb on the merged tree**: `uv run pio2-cocotb --sim icarus` (run of 2026-10-31 not
+   finished at handoff; the pio2_core suites have never run on Icarus). Then a full `uv run pio2-cocotb`
+   with the waiver fix.
+4. **Unanswered**: why the 2026-10-30 handoff recorded Verilator 11/11 with the same binary
+   (oss-cad-suite Verilator 5.049, installed 2026-06-14) that now needs the UNOPTFLAT waiver.
+5. **Branch 1 follow-ups**: add [SPEC-VER-02] "evidence ledger", point [SPEC-TRC-02] Verified by at
+   tests/test_trace_ctf.py, align [SPEC-DBG-13]; then `uv run pio2-trac --record --formal --lint` on a
+   clean tree and commit the ledger; SpecTrace `--check-drift/--check-skills/--check-verifies`.
+6. **Merge the debugger branch** `worktree-agent-aa5ce2bdeac89fae2` (hand-merge `session.py`,
+   `pio2sim.cpp`; 99d587f untested), then the SPI link RTL review (below).
+
 ## Pick up here (handoff 2026-10-30, session stopped by the project owner)
 
 State of `main` (pushed to origin 2026-10-31; both worktree branches pushed too): tile split, DMA + rings + crossbar + core registers, Icarus as second
@@ -51,7 +85,7 @@ git worktree remove .claude/worktrees/agent-*            # once merged (use --fo
 ```
 Use `git status --ignore-submodules=all` (plain `git status` / `git stash` hang on this disk).
 Host moved to Ubuntu 26.04 (2026-10-31): system Python is 3.14 and uv was gone; uv 0.13.6 reinstalled
-to `~/.local/bin`, `.venv` rebuilt with `uv sync` (Python 3.12.16). babeltrace2 is not installed, so the
+to `~/.local/bin`, `.venv` rebuilt with `uv sync` (Python 3.12.16).
 babeltrace2 is now installed: 7 of 8 CTF tests pass. **Open**: `test_debugger_session_records_to_ctf`
 fails on the merged tree; DROPPED counts sum to less than the drop total (1835 vs 2040), see
 engineering_log.md 2026-10-31. Fix the RTL accounting (or prove it right) before relaxing the test.
