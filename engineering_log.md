@@ -366,3 +366,29 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   `msp.c:293-350`, `msp.c:4150-4170`; configurator `ui_main.py:517`, `async_worker.py:297-333`.
 * **Not verified**: why `o_raddr` is X; whether pio2_core hangs or is only slow on Icarus;
   rt-fc-offloader reference RTL (not on this PC).
+
+## 2026-10-31: ESC passthrough checked against rt-fc-offloader; MSP sniffer on the Linux host; 5-SM hot switch
+
+* **Category**: `process-gap` (design decisions), `hardware-fact` (reference behaviour)
+* **What**: read github.com/tcmichals/rt-fc-offloader `22fce99` (`rtl/io/wb_serial_dshot_mux.sv`,
+  `rtl/io/wb_esc_uart.sv`, `python/hw/test_hw_esc_passthrough.py`). It agrees with [SPEC-PIO-13]: only
+  the selected motor pad is driven in serial mode, the others released; break = selected pad forced
+  low (50 ms in the hardware test); one-clock tristate on any mode or channel change; guard one bit;
+  RX ignored while transmitting; start bit rechecked at its middle; 19200 baud default.
+* **Differences**: the reference has an MSP sniffer in RTL (`$M<`, size, then command 0xF5 or 0x64)
+  and its 5 s watchdog covers only that sniffed entry, not manual mux writes. Project owner: the
+  sniffer belongs in the Linux Python app (the MSP stream ends there anyway), added to [SPEC-PIO-13]
+  as proposed: entry on MSP 245 (empty or mode 0xFF), refused while armed, the app takes Betaflight's
+  4-way interface role, exit on 0x34 or 5 s, MSP_IDENT does not enter.
+* **Decision**: ESC / motor testing loads no RC decode or NeoPixel tiles, so passthrough uses five
+  SMs: four DShot on the motor tile plus one `esc_serial` on a spare switch tile, kept loaded; the
+  hot switch is pad-owner writes ([SPEC-PIO-17]), no program load. Reload stays as a fallback.
+* **Process gap (mine)**: in the same session I committed another agent's uncommitted AbstractX
+  edits to a branch and switched back, which removed them from its working tree for about a minute;
+  restored exactly, branch `wip/e906-rpmsg-after-crash` left for that agent to delete. Rule: a pio2
+  session does not change ~/projects/AbstractX's working tree.
+* **Evidence**: spectrace `--check-drift` 0, `--check-skills` 0 problems; `pytest tests` in
+  ~/projects/pio2 492 passed, 1 failed (`test_trace_ctf.py::test_debugger_session_records_to_ctf`,
+  1930 events where > 2000 expected; not diagnosed, possibly TODO item 1).
+* **Not verified**: none of the new text is implemented (`src/pio2/host/msp_passthrough.py`, the
+  pad-owner mux); nothing run on hardware.

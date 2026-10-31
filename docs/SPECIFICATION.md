@@ -216,10 +216,14 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 
 ### `[SPEC-PIO-17]` Runtime Pad Owner Select: Lend a Pad to Another Tile (pio2 Extension)
 * **Goal (project owner, 2026-10-31)**: for ESC passthrough (motors disarmed) a motor pad is handed to
-  a tile whose normal job is not needed then (NeoPixel, RC PWM decode), reloaded with `esc_serial`;
+  a tile whose normal job is not needed then (NeoPixel, RC PWM decode), running `esc_serial`;
   the DShot tile keeps its program loaded (stopped, `[SPEC-PIO-13]`: every other motor wire an input),
   so leaving passthrough is: give the pad back, enable the DShot SMs. No extra tile, no reload of the
   DShot tile. One motor at a time (the configurator enters passthrough for one motor index).
+  **Configuration (project owner, 2026-10-31)**: ESC / motor testing loads no RC PWM decode,
+  NeoPixel or other tiles, so five state machines are used: the four DShot SMs on the motor tile and
+  one `esc_serial` SM on a spare **switch tile**, loaded once at start and kept loaded. The hot switch
+  to passthrough is then pad-owner writes only: no program load at switch time, on either tile.
   **Status: proposed, not implemented.**
 * **Requirement (pin map)**: a pad in `hw/<board>/pins.toml` (`[SPEC-PIO-09]`) has its home tile and pin
   and may list **alternates** (tile, tile pin). Only listed pairs are wired; the mux is built from the
@@ -237,7 +241,7 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
 * **Relation**: `[SPEC-PIO-16]` (preload) is then optional for the passthrough case; it stays useful
   for switching a whole tile in one clock.
 * **Verified by**: `cocotb-regression` (DShot tile stopped and pads released, lend motor pad 2 to the
-  LED tile running `esc_serial`, bytes both ways; refused while either side drives; no clock with two
+  switch tile running `esc_serial`, bytes both ways; refused while either side drives; no clock with two
   drivers; give it back, DShot resumes with no reload), `rtl-lint`, `fpga-fit` (mux cost), `board-bringup` (Tang Nano 9K one-motor bench)
 * **Implementation Target**: board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`, `src/rtl/pio2_core_regs.sv`
 
@@ -325,17 +329,38 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
   (`[SPEC-DMA-02]`); nothing is
   received while transmitting. The break is driven by the host through `SMx_INSTR`
   (`set pins, 0` / `set pindirs, 1`) with the state machine stopped.
-* **Requirement (host, not RTL)**: enter only while disarmed; stop the motor state machines; drive
-  the selected wire low for the bootloader break; load `esc_serial` on that motor's state machine;
-  every other motor wire stays input; leave by reloading the motor program; leave automatically
-  after 5 s without passthrough traffic; refuse motor commands while in passthrough.
+* **Requirement (host, not RTL)**: enter only while disarmed; stop the motor state machines and
+  release every motor wire; hand the selected motor's pad to the switch tile (`[SPEC-PIO-17]`), whose
+  state machine already runs `esc_serial`; drive that wire low for the bootloader break; every other
+  motor wire stays input; leave by giving the pad back and re-enabling the motor state machines (the
+  DShot program is never unloaded); leave automatically after 5 s without passthrough traffic; refuse
+  motor commands while in passthrough. Fallback when no spare tile is free: load `esc_serial` on the
+  motor tile and reload the motor program on leaving.
+* **Requirement (MSP sniffer, Linux host app, not RTL; project owner 2026-10-31; status: proposed,
+  not implemented)**: the configurator's MSP stream already ends in the Linux Python app, so that app,
+  not the FPGA, watches it for passthrough entry. It parses MSPv1 requests (`$M<`, size, command,
+  payload, XOR checksum); a frame with a bad checksum is ignored. On `MSP_SET_PASSTHROUGH` (245) with
+  an empty payload or mode `0xFF` (`MSP_PASSTHROUGH_ESC_4WAY`) it enters 4-way mode: refused (MSP error
+  reply, motors untouched) while armed, otherwise it runs the entry steps above and replies with the
+  number of ESCs, as Betaflight's esc4wayInit() does. In 4-way mode the app takes the flight
+  controller's 4-way interface role (Betaflight `serial_4way.c`: frames start `0x2F`, answers start
+  `0x2E`): the ESC named by each frame is the one whose pad carries `esc_serial`, and switching ESC
+  repeats the break on the new wire with the old one released first. It leaves on `cmd_InterfaceExit`
+  (`0x34`) or after 5 s without a frame, and only then accepts motor commands again. Other MSP modes
+  (`0xFD` serial passthrough, the legacy ESC protocols) are refused. Unlike the reference RTL sniffer,
+  `MSP_IDENT` (100) does not enter passthrough, and every manual entry is covered by the 5 s timeout too.
 * **Reference behaviour**: `rt-fc-offloader/rtl/io/wb_esc_uart.sv` and `wb_serial_dshot_mux.sv`
-  (hardware-tested with `python/hw/test_hw_esc_passthrough.py`): guard time = one bit, break by
-  forcing the line low, tristate between modes, 5 s watchdog.
+  (github.com/tcmichals/rt-fc-offloader `22fce99`, hardware-tested with
+  `python/hw/test_hw_esc_passthrough.py`, 50 ms break): guard time = one bit, break by forcing the
+  line low, unselected motor pads released, one-clock tristate on every mode or channel change, RX
+  ignored while transmitting, 5 s watchdog (only on its MSP-sniffed auto entry).
 * **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_esc_serial_cocotb.py`: bytes
   out at 19200, guard bit then release, no echo, modelled ESC answer at nominal and +-2 % clock,
-  glitch rejected, host break), `board-bringup` (read ESC version through the configurator)
-* **Implementation Target**: `src/programs/esc_serial.pio`
+  glitch rejected, host break), `host-tests` (MSP sniffer: entry on 245 / `0xFF` and empty payload,
+  refused while armed, bad checksum ignored, `MSP_IDENT` ignored, exit on `0x34` and on 5 s timeout,
+  motor commands refused in between), `board-bringup` (read ESC version through the configurator)
+* **Implementation Target**: `src/programs/esc_serial.pio`, `src/pio2/host/msp_passthrough.py`
+* **Not implemented yet**: `src/pio2/host/msp_passthrough.py` (the MSP sniffer and 4-way interface)
 
 
 ### `[SPEC-PIO-14]` Third-Party Program Conformance (pico-examples, Betaflight)
