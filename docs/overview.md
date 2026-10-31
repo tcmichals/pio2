@@ -36,7 +36,7 @@ flowchart TB
         SPI["SPI / Dual-SPI link<br/>128-byte frames, CRC32<br/>channels, INT_n pin"]:::opt
     end
     subgraph OPTB["option B: Zynq-7000, no SPI"]
-        ZAD["PS GP port + AXI MCDMA<br/>Xilinx IP, no pio2 RTL"]:::opt
+        ZAD["PS GP port + pio2 ring DMA<br/>pio2 RTL, no vendor IP"]:::opt
     end
 
     subgraph CORE["pio2 core: same RTL on every board"]
@@ -150,8 +150,8 @@ flowchart LR
     end
 
     subgraph ZAD["Zynq adapter: Xilinx IP only"]
-        CONV["AXI interconnect<br/>AXI3 to AXI4-Lite"]:::xil
-        MC["AXI MCDMA<br/>one channel per pio2 channel<br/>routed by TDEST"]:::xil
+        CONV["axi_axil_adapter (Forencich)<br/>AXI3 to AXI4-Lite"]:::xil
+        MC["pio2_ring_dma on HP0<br/>one DDR ring per channel<br/>chosen by TDEST"]:::xil
     end
 
     CORE["pio2 core boundary"]:::core
@@ -172,7 +172,7 @@ flowchart LR
 | | Option A: SPI link | Option B: Zynq |
 | :--- | :--- | :--- |
 | Registers | channel 0 frames, the link's AXI4-Lite master | PS GP port, memory mapped (UIO) |
-| Streams in / out | `STREAM_DATA` frames, channel in the header | AXI MCDMA, channel in `TDEST` |
+| Streams in / out | `STREAM_DATA` frames, channel in the header | pio2 ring DMA to DDR rings, channel in `TDEST` |
 | Integrity | CRC32 per frame | on-chip bus |
 | Interrupt | `INT_n` pin | `IRQ_F2P` |
 | Throughput | about 10 MB/s goal (Dual SPI) | hundreds of MB/s; the PIO is the limit |
@@ -302,7 +302,7 @@ flowchart LR
         SPI["SPI link<br/>chan 1 frames, CRC32"]:::opt
     end
     subgraph B["option B"]
-        MC["AXI MCDMA<br/>to DDR"]:::opt
+        MC["pio2 ring DMA<br/>to DDR"]:::opt
     end
 
     subgraph HOST["host: pio2 driver"]

@@ -39,7 +39,7 @@ flowchart TB
         SPI["SPI / Dual-SPI<br/>128 B frames, CRC32, INT_n"]:::opt
     end
     subgraph OPTB["option B: Zynq, no SPI"]
-        ZAD["PS GP port + AXI MCDMA"]:::opt
+        ZAD["PS GP port + pio2 ring DMA (HP0)"]:::opt
     end
 
     subgraph CORE["pio2 core: same RTL on every board"]
@@ -126,7 +126,7 @@ reverse step, FST / CTF export, saved layouts, the editor window, more parts, DM
   traces and board traces open in the same viewers (AbstractX Studio, babeltrace2), and a
   simulated run can be compared with a board run event by event.
 * **Zynq: native AXI, no SPI.** On the Zynq-7000 the SPI link is not built: the PS GP port drives the
-  core's AXI4-Lite slave and the Xilinx AXI MCDMA connects to its two AXI-Stream ports, channel in
+  core's AXI4-Lite slave and pio2's own ring DMA (an AXI master on HP0, no vendor IP) connects its two AXI-Stream ports to DDR rings, channel in
   `TDEST` ([SPEC-ICN-11]).
 * **Full validation** ([SPEC-VER-01]): ZipCPU's AXI formal properties under SymbiYosys, UVM-style
   pyuvm testbenches with cocotbext-axi, functional coverage with cocotb-coverage.

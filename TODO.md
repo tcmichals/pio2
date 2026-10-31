@@ -169,8 +169,12 @@ Next steps, in order:
 4. [ ] Tang boards in pio2 ([SPEC-ICN-12]): pio2-native tops (SPI link + core + PIO), DShot / ESC serial /
    UART as PIO programs, pin mux ([SPEC-PIO-09]); then remove the Tang boards (9K, Nano 20K, Primer
    20K) from AbstractX
-5. [ ] Zynq ([SPEC-ICN-11]): Vivado block design: PS GP port to the core's AXI4-Lite slave, AXI MCDMA on its two
-   AXI-Stream ports (channel in `TDEST`), `IRQ_F2P`; Zynq driver back end
+5. [ ] Zynq ([SPEC-ICN-11], 2026-10-30: no vendor IP): `pio2_zynq_adapter` = Forencich `axi_axil_adapter` (GP0 to the
+   core's AXI4-Lite) + `pio2_ring_dma` (AXI master on HP0, one DDR ring per channel by `TDEST`, data written and
+   acknowledged before the head moves) + one `IRQ_F2P`; cocotb tests for both; Zynq driver back end over one
+   `generic-uio` device (map 0 registers, map 1 rings).
+   - [ ] Link traffic-mix test (AbstractX [SPEC-ARCH-14]): Dual SPI at 10 MHz SCK carrying 8 kHz IMU frames, 8 kHz
+     DShot writes, 1 Mbaud serial and trace; measure link busy % and window rate (estimate ~30 %, ~16,000/s).
 6. [ ] AbstractX: wrapper that adds the TLP adapters around the pio2 tile; its TLP-path test moves back
 7. [ ] Evidence ledger for pio2 (trac.py records) so the matrix can show VERIFIED
 8. [ ] Wiki / tutorials and demos (how the PIO works, debugger walkthroughs) once the debugger runs
