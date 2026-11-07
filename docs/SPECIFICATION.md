@@ -155,6 +155,7 @@ flowchart TD
   * `0x0C`, `0x90`, `0x94`, `0x98`, `0x11C + 0x20 * N`: not used in pio2 (read 0); AbstractX's
     wrapper serves its TLP registers at these offsets (`[SPEC-ICN-09]`).
   * `0x10 .. 0x8C`: Instruction Memory (32 words x 32-bit, lower 16 bits active).
+  * `0x9C`: `PIN_BASE`, first GPIO of the pin window (`[SPEC-PIO-21]`).
   * `0x100 + 0x20 * N`: SM `N` Clock Divider, RP2040 `CLKDIV` layout (`INT[31:16]`, `FRAC[15:8]`).
   * `0x104 + 0x20 * N`: SM `N` `EXECCTRL`, RP2040 layout (`STATUS_N[3:0]`, `STATUS_SEL[4]`, wrap, `JMP_PIN`, `SIDE_PINDIR`, `SIDE_EN`).
   * `0x108 + 0x20 * N`: SM `N` `SHIFTCTRL`, RP2040 layout (autopush, autopull, in/out dir, thresholds).
@@ -244,6 +245,23 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
   switch tile running `esc_serial`, bytes both ways; refused while either side drives; no clock with two
   drivers; give it back, DShot resumes with no reload), `rtl-lint`, `fpga-fit` (mux cost), `board-bringup` (Tang Nano 9K one-motor bench)
 * **Implementation Target**: board tops under `hw/`, `hw/<board>/pins.toml`, `tools/pin_map.py`, `src/rtl/pio2_core_regs.sv`
+
+### `[SPEC-PIO-21]` Pin Window and Bank: Pin Logic Sized by `NUM_PINS` (pio2 Extension)
+* **Goal (project owner, 2026-11-06)**: fit small FPGAs (Tang Nano 20K, 9K) and stay general purpose. The
+  pin rotators are most of a state machine's pin cost and grow with the pins an SM can reach, so the SMs
+  work on a window of pins and one mux per tile chooses where the window sits.
+* **Requirement**: `NUM_PINS` (build parameter of the tile: 8, 16 or 32, default 32) is the window size.
+  To the SMs, pin numbers (`IN_BASE`, `OUT_BASE`, `SET_BASE`, `SIDESET_BASE`, `JMP_PIN`, `WAIT GPIO`, `WAIT PIN`)
+  count modulo `NUM_PINS` and groups wrap at `NUM_PINS`. Reading pins (`IN PINS`, `MOV x, PINS`): window
+  bits rotated by `IN_BASE`; the bits above `NUM_PINS` read 0. With `NUM_PINS` 32 the tile behaves as it did.
+* **Requirement**: `PIN_BASE` (`0x9C`, read / write, reset 0) is the GPIO that is pin 0 of the window. It is a
+  multiple of `NUM_PINS`: the low bits are dropped on write, so it is always 0 at `NUM_PINS` 32. GPIOs
+  outside the window read as nothing to the SMs and have output and direction 0; the pin latches stay with
+  the window, not the GPIO. Set it while the SMs are disabled (like the RP2350's `GPIOBASE`, which it follows
+  in spirit, with its own offset). One tile sees one window at a time.
+* **Verified by**: `cocotb-regression` (`tests/cocotb/test_asp_pio_pin_window_cocotb.py`, built with `NUM_PINS` 16),
+  `fpga-fit` (cost at 8, 16 and 32)
+* **Implementation Target**: `src/rtl/asp_pio_tile.sv`, `src/rtl/asp_pio_sm.sv`
 
 ### `[SPEC-PIO-11]` Program Library and Loading
 * **Requirement**: programs live as `.pio` sources in `src/programs/`, assembled by the Raspberry
@@ -421,7 +439,7 @@ ports and observation port. In pio2 the data path is the DMA engine (`[SPEC-DMA-
   | `SMx_ADDR` (PC), `SMx_INSTR` read (current instruction) | **partial** | PC readable in our status register; current instruction not readable |
   | Register offsets and reset values (`SHIFTCTRL` 0x000C0000, `PINCTRL.SET_COUNT` 5, `EXECCTRL.WRAP_TOP` 31) | **differs** | own map ([SPEC-PIO-05]); `SHIFTCTRL`/`PINCTRL` reset to 0. Host software uses our map; the SDK writes every field it relies on |
   | DMA DREQ per FIFO | done | AXI-Stream FIFO ports paced by the handshake, DMA channels (`[SPEC-ICN-09]`, `[SPEC-DMA-01]`) |
-  | GPIO count 30, two PIO blocks of 4 SMs | not planned | 32 tile pins; tiles instead of blocks |
+  | GPIO count 30, two PIO blocks of 4 SMs | not planned | 32 tile pins (window of 8, 16 or 32, `[SPEC-PIO-21]`); tiles instead of blocks |
 
 * **Verified by**: `cocotb-regression` (rows marked done), review of this table against the datasheet
 * **Implementation Target**: `src/rtl/asp_pio_sm.sv`, `src/rtl/asp_pio_tile.sv`

@@ -276,8 +276,10 @@ Board items (live board trace, silicon diff, Tang fit) come after these.
 
 ## Blocker: the tile does not fit the Tang boards (found 2026-10-31)
 
-AbstractX top needs 261 % of the 9K's LUTs and 110 % of the 20K's; the tile alone is ~29k LUT
-(flattened `synth_gowin`), ~6k per SM. No Tang Fmax until it fits. Details: engineering_log.md.
+Tile on the 20K, placed and routed, `synth_gowin -nowidelut` (2026-11-07, engineering_log.md): 32 pins 16,027
+LUT (77 %), 16 pins 13,643 (65 %), 8 pins 12,255 (59 %). Before the SM rewrite: 20,859, did not place. That is the
+tile alone: the DMA (14,145 LUT by Yosys, 8 channels and rings) and the link are not in it, and neither board
+fits the whole core yet. The 9K (8,640 LUT) needs well under half of today's tile.
 1. Find what costs the area in `asp_pio_sm.sv` (Yosys `stat` per construct; try one rotator per
    direction shared by IN / OUT / MOV, FIFO in RAM16SDP4 instead of flip-flops), with the ISA suite
    (384 cases) as the guard; target well under 2k LUT per SM.

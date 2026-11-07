@@ -622,3 +622,44 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Evidence**: three new tests failed on the old code; a fourth (our own RTL is not waived) passes on both,
   by design. See the commit message for the suite result.
 * **Not verified**: `pio2_spi_phy` behaviour; lint with other Verilator versions (5.049 here); Icarus cocotb.
+
+## 2026-11-07: State machine rewritten for area; the tile places and routes on the Tang Nano 20K
+
+* **Category**: `product-bug` (area), `process-gap`, `tool-bug` (2)
+* **Goal** (project owner): it must fit the 20K, and stay general purpose, even on a 9K. Motors 4, PWM 6, NeoPixel 1.
+* **What**: `asp_pio_sm.sv` rewritten with the same behaviour: one `always_comb` next state and one decode, one
+  rotator for IN and OUT shifts (one shift per instruction), pin masks from two thermometer codes instead of rotated
+  masks, one pin mux for WAIT and JMP PIN, FIFOs as two RAMs (`tx_mem`, `rx_mem`, one write and one read each, no
+  reset). New `[SPEC-PIO-21]`: `NUM_PINS` window (8, 16, 32) and `PIN_BASE` at `0x9C`, the project owner's bank mux
+  idea and what the RP2350's `GPIOBASE` does. `synth_gowin -nowidelut`.
+* **Measured** (fit wrapper, GW2AR-LV18QN88C8/I7, nextpnr seed 1, 50 MHz target; routed):
+
+  | Tile | LUT4 / 20,736 | DFF | ALU | RAM16SDP4 | Fmax |
+  |---|---|---|---|---|---|
+  | before, 32 pins, `-nowidelut` | 20,859 (100 %), no legal placement | 3,711 | 1,424 | 40 | none |
+  | before, 32 pins, wide LUTs | synthesis over 500 s | | | | none |
+  | after, 32 pins | 16,027 (77 %) | 3,071 | 1,122 | 104 | 67.3 MHz |
+  | after, 16 pins | 13,643 (65 %) | 2,784 | 1,138 | 104 | 86.1 MHz |
+  | after, 8 pins | 12,255 (59 %) | 2,641 | 1,114 | 104 | 68.3 MHz |
+
+  The wrapper (an LFSR on the inputs, XOR of the outputs) is in these numbers, not measured apart. One seed: the
+  Fmax figures move with the seed (8 pins came out slower than 16).
+* **Wide LUT fact**: at 16 pins, the default mapping gives 24,541 LUT4 + 6,131 MUX2_LUT5 and no placement; `-nowidelut`
+  gives 16,473 on the same RTL (before the fix below). Yosys's wide mux mapping is much worse here.
+* **Tool bugs**: (1) `n > i` per mask bit became one carry chain per bit: ALU 1,424 -> 6,550 and 21,099 LUT at
+  32 pins. Written as gates (i is constant) it folds away: 16,168. (2) SpecTrace reads the first `word (` after an
+  `@impl` as the site, so the comment "pin window ([SPEC-PIO-21])" made 8 false unbacked claims; reworded.
+* **Product bug of mine, caught by synthesis**: partly assigned variables in `always_comb` were latches; every
+  simulation passed. Yosys refused them.
+* **Earlier size figures**: `-noflatten` `stat` is not a fit number (AbstractX EL-1027-41 already found that), and
+  the two Yosys frontends differ a lot: the old SM is 6,192 LUT through `read_verilog -sv`, 8,999 through slang.
+* **Comparison**: `lawrie/fpga_pio` (incomplete) 17,396 LUT flat as a whole PIO, with the default mapping, not
+  routed; Bunnie measured a fork of it at about 5,000 logic cells per core on Artix-7 and found rotate + mask costs
+  more than the state machine (bunniestudios.com, BIO). Raspberry Pi's own RTL is not public. Nothing was copied.
+* **Process gap**: I measured for hours before applying standard methods the project owner asked why I had not
+  led with, and never looked at prior work until asked. Datasheets now live in `~/.cache/pio2/docs`, not the repo.
+* **Evidence**: see the commit message. 5 bugs put back in the window logic: 4 caught at once; the fifth (a
+  `JMP_PIN` above the window) survived, so a test was added and it now fails.
+* **Not verified**: anything on a board; the whole `pio2_core` with DMA on the 20K (it does not fit yet, DMA is the
+  next item); other seeds; `NUM_PINS` 8 and 32 with the window suite (it is built at 16); an example from the
+  debugger at 16 pins (the debugger builds 32).

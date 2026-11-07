@@ -469,11 +469,11 @@ class Session:
         shift = self._get("sm_shiftctrl", sm)
         jt = bool(shift >> 30 & 1)
         jr = bool(shift >> 31 & 1) and not jt
-        mem = [self._get(f"gen_sm[{sm}].u_sm.fifo_mem", i) for i in range(8)]
-        tx_idx = (lambda p: p & 7) if jt else (lambda p: p & 3)
-        rx_idx = (lambda p: p & 7) if jr else (lambda p: 4 | (p & 3))
-        st["tx_fifo"] = [mem[tx_idx(st["tx_rd_ptr"] + i)] for i in range(st["tx_level"])]
-        st["rx_fifo"] = [mem[rx_idx(st["rx_rd_ptr"] + i)] for i in range(st["rx_level"])]
+        tx_mem = [self._get(f"gen_sm[{sm}].u_sm.tx_mem", i) for i in range(8)]
+        rx_mem = [self._get(f"gen_sm[{sm}].u_sm.rx_mem", i) for i in range(8)]
+        tx_mask, rx_mask = (7 if jt else 3), (7 if jr else 3)
+        st["tx_fifo"] = [tx_mem[(st["tx_rd_ptr"] + i) & tx_mask] for i in range(st["tx_level"])]
+        st["rx_fifo"] = [rx_mem[(st["rx_rd_ptr"] + i) & rx_mask] for i in range(st["rx_level"])]
         st["enabled"] = bool(self._get("sm_en") >> sm & 1)
         st["clkdiv"] = self._get("sm_clkdiv", sm)
         st["execctrl"] = self._get("sm_execctrl", sm)

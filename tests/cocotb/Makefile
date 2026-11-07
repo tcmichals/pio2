@@ -20,8 +20,13 @@ VERILOG_SOURCES = $(if $(filter verilator,$(SIM)),$(PIO2_ROOT)/src/rtl/third_par
 ifeq ($(MODULE),test_pio2_dma_cocotb)
 SIM_PARAMS ?= -GRING_WORDS=16
 endif
+else ifeq ($(MODULE),test_asp_pio_pin_window_cocotb)
+VERILOG_SOURCES = $(RTL_DIR)/asp_pio_sm.sv $(RTL_DIR)/asp_pio_tile.sv
+SIM_PARAMS ?= -GNUM_PINS=16
 else ifeq ($(TOPLEVEL),pio2_axil_regs)
 VERILOG_SOURCES = $(PIO2_ROOT)/src/rtl/axi/pio2_axil_regs.sv
+else ifeq ($(TOPLEVEL),pio2_spi_phy)
+VERILOG_SOURCES = $(RTL_DIR)/link/pio2_spi_phy.sv
 else ifeq ($(TOPLEVEL),pio2_event_fifo)
 VERILOG_SOURCES = $(AXIS_DIR)/axis_fifo.v $(RTL_DIR)/trace/pio2_event_fifo.sv
 SIM_PARAMS ?= -GDEPTH=16

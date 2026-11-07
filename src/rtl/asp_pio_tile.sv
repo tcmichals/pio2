@@ -12,10 +12,11 @@
 // 5. Per SM an AXI-Stream TX input and RX output on its FIFOs, for the DMA engine ([SPEC-ICN-09]).
 // 6. Read-only observation port for the trace tap ([SPEC-TRC-03]).
 //
-// @impl [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-05] docs/SPECIFICATION.md
+// @impl [SPEC-PIO-01] [SPEC-PIO-02] [SPEC-PIO-03] [SPEC-PIO-05] [SPEC-PIO-21] docs/SPECIFICATION.md
 // @impl [SPEC-ICN-09] docs/INTERCONNECT_SPECIFICATION.md
 module asp_pio_tile #(
-    parameter logic [31:0] BASE_ADDR = 32'h40000700
+    parameter logic [31:0] BASE_ADDR = 32'h40000700,
+    parameter int NUM_PINS = 32                 // 8, 16 or 32: size of the pin window, [SPEC-PIO-21]
 ) (
     input  wire          clk,
     input  wire          rst_n,
@@ -256,13 +257,13 @@ module asp_pio_tile #(
 
     // Pin latches, one per pin for the whole tile ([SPEC-PIO-02] rule 10): each clock the write of
     // the highest-numbered SM writing a pin is applied; unwritten pins keep their value
-    logic [31:0] out_q, dir_q;
+    logic [31:0] out_q, dir_q, win_out, win_dir;
     always_comb begin
-        o_gpio_out    = out_q;
-        o_gpio_pindir = dir_q;
+        win_out = out_q;
+        win_dir = dir_q;
         for (int s = 0; s < 4; s++) begin
-            o_gpio_out    = (o_gpio_out    & ~sm_out_wmask[s]) | (sm_out_wval[s] & sm_out_wmask[s]);
-            o_gpio_pindir = (o_gpio_pindir & ~sm_dir_wmask[s]) | (sm_dir_wval[s] & sm_dir_wmask[s]);
+            win_out = (win_out & ~sm_out_wmask[s]) | (sm_out_wval[s] & sm_out_wmask[s]);
+            win_dir = (win_dir & ~sm_dir_wmask[s]) | (sm_dir_wval[s] & sm_dir_wmask[s]);
         end
     end
     always_ff @(posedge clk or negedge rst_n) begin
@@ -270,8 +271,21 @@ module asp_pio_tile #(
             out_q <= '0;
             dir_q <= '0;                 // every pin an input after reset ([SPEC-PIO-09])
         end else begin
-            out_q <= o_gpio_out;
-            dir_q <= o_gpio_pindir;
+            out_q <= win_out;
+            dir_q <= win_dir;
+        end
+    end
+
+    // Pin window ([SPEC-PIO-21]): one mux per tile puts the SMs' NUM_PINS pins on the GPIOs from pin_base
+    localparam logic [4:0] PIN_LOW = 5'(NUM_PINS - 1);
+    logic [4:0]  pin_base;
+    logic [31:0] gpio_win;
+    always_comb begin
+        gpio_win = '0;
+        for (int i = 0; i < NUM_PINS; i++) gpio_win[i] = i_gpio[pin_base | 5'(i)];
+        for (int i = 0; i < 32; i++) begin
+            o_gpio_out[i]    = (5'(i) & ~PIN_LOW) == pin_base && win_out[5'(i) & PIN_LOW];
+            o_gpio_pindir[i] = (5'(i) & ~PIN_LOW) == pin_base && win_dir[5'(i) & PIN_LOW];
         end
     end
 
@@ -281,7 +295,8 @@ module asp_pio_tile #(
     generate
         for (genvar s = 0; s < 4; s++) begin : gen_sm
             asp_pio_sm #(
-                .SM_ID(s)
+                .SM_ID(s),
+                .NUM_PINS(NUM_PINS)
             ) u_sm (
                 .clk              (clk),
                 .rst_n            (rst_n),
@@ -296,7 +311,7 @@ module asp_pio_tile #(
                 .i_pinctrl        (sm_pinctrl[s]),
                 .o_pc             (sm_pc[s]),
                 .i_instr          (sm_instr[s]),
-                .i_gpio           (i_gpio),
+                .i_gpio           (gpio_win),
                 .o_out_wmask      (sm_out_wmask[s]),
                 .o_out_wval       (sm_out_wval[s]),
                 .o_dir_wmask      (sm_dir_wmask[s]),
@@ -337,6 +352,7 @@ module asp_pio_tile #(
             sm_clkdiv_restart   <= 4'd0;
             wb_tx_wvalid        <= 4'd0;
             sm_exec_valid       <= 4'd0;
+            pin_base            <= 5'd0;
 
             for (int s = 0; s < 4; s++) begin
                 sm_clkdiv[s]    <= {16'd1, 8'd0}; // Div = 1.0 (full speed)
@@ -368,6 +384,7 @@ module asp_pio_tile #(
                         12'h004: begin // IRQ Clear
                             wb_irq_clr <= wb_dat_i[7:0];
                         end
+                        12'h09C: pin_base <= wb_dat_i[4:0] & ~PIN_LOW; // PIN_BASE ([SPEC-PIO-21])
                         default: begin
                             // Instruction Memory (0x010 .. 0x08C)
                             // (instruction memory writes: see the iram block below)
@@ -401,6 +418,7 @@ module asp_pio_tile #(
                     case (reg_offset)
                         12'h000: wb_dat_o <= {28'd0, sm_en};
                         12'h004: wb_dat_o <= {24'd0, irq_flags};
+                        12'h09C: wb_dat_o <= {27'd0, pin_base};
                         12'h008: begin // FIFO Status
                             wb_dat_o <= {
                                 ~sm_rx_rvalid, // RX empty

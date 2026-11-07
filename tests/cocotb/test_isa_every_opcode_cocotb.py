@@ -85,8 +85,8 @@ class CocotbHw:
         shift = _int(dut.sm_shiftctrl[0])
         jt = bool(shift >> 30 & 1)
         jr = bool(shift >> 31 & 1) and not jt
-        idx = (lambda p: p & 7) if jr else (lambda p: 4 | (p & 3))
-        st["rx_fifo"] = [_int(sm.fifo_mem[idx(st["rx_rd_ptr"] + i)]) for i in range(st["rx_level"])]
+        mask = 7 if jr else 3
+        st["rx_fifo"] = [_int(sm.rx_mem[(st["rx_rd_ptr"] + i) & mask]) for i in range(st["rx_level"])]
         return st
 
     async def _pins(self):
