@@ -32,6 +32,9 @@ dev = [
     "pyyaml>=6.0.3",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

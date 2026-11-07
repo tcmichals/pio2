@@ -205,25 +205,35 @@ def run_formal(root: Path, files: list[str]) -> dict[str, FileResult]:
     return res
 
 
-LINT_DIRS = ["src/rtl", "src/rtl/trace", "third_party/verilog-axis/rtl"]
+THIRD_PARTY_RTL = ["third_party/verilog-axis/rtl", "third_party/verilog-axi/rtl"]
+LINT_WAIVERS = "src/rtl/third_party.vlt"
+
+
+def lint_dirs(root: Path) -> list[str]:
+    """-y folders: every folder under src/rtl that holds RTL, so a new one cannot be missed, and the
+    third-party RTL by absolute path: the waiver pattern `*/third_party/*` needs a folder in front."""
+    ours = {str(p.parent.relative_to(root)) for p in (root / "src" / "rtl").rglob("*.sv")}
+    return sorted(ours) + [str(root / d) for d in THIRD_PARTY_RTL if (root / d).is_dir()]
 
 
 def run_lint(root: Path) -> FileResult:
     """The rtl-lint skill: verilator --lint-only with each module under src/rtl as top (other modules
-    found through -y: src/rtl, src/rtl/trace, Forencich verilog-axis); fail on MULTIDRIVEN,
-    SYNCASYNCNET, CASEINCOMPLETE or any error."""
+    found through -y, see lint_dirs; third-party warnings waived by LINT_WAIVERS); fail on
+    MULTIDRIVEN, SYNCASYNCNET, CASEINCOMPLETE or any error."""
+    root = root.resolve()
     env = tool_env()
     vl = shutil.which("verilator", path=env["PATH"])
     if not vl:
         return FileResult("skip", detail="no verilator")
     srcs = sorted(str(p.relative_to(root)) for p in (root / "src" / "rtl").rglob("*.sv"))
+    ydirs = [a for d in lint_dirs(root) for a in ("-y", d)]
+    waivers = [LINT_WAIVERS] if (root / LINT_WAIVERS).is_file() else []
     bad = []
     for s in srcs:
         top = Path(s).stem
-        ydirs = [a for d in LINT_DIRS for a in ("-y", d)]
         proc = subprocess.run([vl, "--lint-only", "-Wall", "-Wno-DECLFILENAME", "-Wno-UNUSEDSIGNAL",
                                "-Wno-UNUSEDPARAM", "-Wno-PINCONNECTEMPTY", "-Wno-WIDTHTRUNC", "-Wno-WIDTHEXPAND",
-                               "-Wno-fatal", *ydirs, s, "--top-module", top],
+                               "-Wno-fatal", *ydirs, *waivers, s, "--top-module", top],
                               cwd=root, env=env, capture_output=True, text=True)
         out = proc.stdout + proc.stderr
         hits = re.findall(r"%Warning-(MULTIDRIVEN|SYNCASYNCNET|CASEINCOMPLETE)", out)

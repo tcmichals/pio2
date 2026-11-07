@@ -150,3 +150,57 @@ def test_abstractx_matrix_shows_verified(tmp_path):
     (tmp_path / "src" / "m.py").write_text("# @impl [SPEC-T-01] [SPEC-T-02] docs/T_SPECIFICATION.md\nX = 2\n")
     git(tmp_path, "commit", "-qam", "change")
     assert matrix() == {"VERIFIED": 0, "STALE": 2, "FAILING": 1}
+
+
+# ---------------------------------------------------------------- the checks reach what they claim to
+def module(name, body=""):
+    return f"module {name}(input logic clk);\n{body}\nendmodule\n"
+
+
+def lint_tree(tmp_path, files):
+    for path, text in files.items():
+        p = tmp_path / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    return trac.run_lint(tmp_path)
+
+
+needs_verilator = pytest.mark.skipif(not __import__("shutil").which("verilator", path=trac.tool_env()["PATH"]),
+                                     reason="no verilator")
+
+
+@needs_verilator
+def test_lint_finds_modules_in_any_rtl_folder(tmp_path):
+    """Before the fix the folders were a fixed list without src/rtl/axi: pio2_core, pio2_core_regs and
+    pio2_dma stopped at MODMISSING and were never linted. A new folder must just work."""
+    r = lint_tree(tmp_path, {"src/rtl/top.sv": module("top", "new_block u(.clk(clk));"),
+                             "src/rtl/new_folder/new_block.sv": module("new_block")})
+    assert r.result == "pass", r.detail
+
+
+@needs_verilator
+def test_lint_still_fails_a_forbidden_warning(tmp_path):
+    """The other way round: our own RTL is not waived."""
+    r = lint_tree(tmp_path, {"src/rtl/bad.sv": module("bad", """
+    logic [1:0] s; logic q;
+    always_ff @(posedge clk) case (s) 2'd0: q <= 1'b0; endcase""")})
+    assert r.result == "fail" and "CASEINCOMPLETE" in r.detail, r.detail
+
+
+@needs_verilator
+def test_lint_waives_third_party_but_not_ours():
+    """The real tree: every module is linted (no %Error), and pio2_core is clean, which needs the
+    third_party.vlt waiver to match (CASEINCOMPLETE in Forencich axil_crossbar_addr.v)."""
+    r = trac.run_lint(Path(trac.ROOT))
+    assert "%Error" not in r.detail, r.detail
+    assert "pio2_core" not in r.detail and "pio2_dma" not in r.detail, r.detail
+
+
+def test_bare_pytest_collects_only_our_tests():
+    """The host-tests skill's command is `uv run pytest`. Without testpaths it collected
+    third_party/verilog-axis/tb and stopped with 129 errors (no myhdl) before running anything."""
+    p = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"], cwd=trac.ROOT,
+                       capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout[-800:]
+    assert not [ln for ln in p.stdout.splitlines() if ln.startswith("third_party/")], p.stdout[-800:]
+    assert "tests/test_trac.py" in p.stdout

@@ -13,11 +13,13 @@ description: "Check skill. RTL is free of multi-driven signals, width errors and
 
 ```bash
 export PATH="$HOME/.tools/oss-cad-suite/bin:$PATH"
-uv run pio2-trac --no-cocotb --lint     # every src/rtl/**/*.sv as top, the rest found through -y
+uv run pio2-trac --no-cocotb --lint     # every src/rtl/**/*.sv as top, the rest found through -y (trac.lint_dirs)
 # by hand, one module:
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
-  -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -y src/rtl -y src/rtl/trace -y third_party/verilog-axis/rtl \
+  -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -y src/rtl -y src/rtl/trace -y src/rtl/axi -y src/rtl/dma -y src/rtl/link \
+  -y $PWD/third_party/verilog-axis/rtl -y $PWD/third_party/verilog-axi/rtl src/rtl/third_party.vlt \
   src/rtl/pio2_core.sv --top-module pio2_core
+# $PWD: the third_party.vlt waiver pattern `*/third_party/*` does not match a relative third_party/ path
 ```
 
 ## Pass criteria

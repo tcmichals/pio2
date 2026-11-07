@@ -599,3 +599,26 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
 * **Not verified**: a real mouse (clicks come from ImGui Test Engine); the overshoot message in the real
   window (null backend test only); stepping behind the horizon from the GUI (no Back control); at the widest
   analyzer views one clock is under a pixel, so a single step is not visible there.
+
+## 2026-11-06: Two checks did not check what they said: bare pytest and rtl-lint
+
+* **Category**: `tool-bug` (2), `process-gap`, `product-bug` (found, not fixed)
+* **What**:
+  1. The `host-tests` command `uv run pytest` ran nothing: no `testpaths`, so it collected
+     `third_party/verilog-axis/tb` and stopped with 129 errors (no `myhdl`). Everyone, this log included,
+     ran `pytest tests` instead, which hid it. `pyproject.toml` now has `testpaths = ["tests"]`.
+  2. `pio2-trac --lint` had a fixed folder list without `src/rtl/axi`, so `pio2_core`, `pio2_core_regs` and
+     `pio2_dma` stopped at MODMISSING and were never linted. The list now comes from the tree.
+  3. `third_party.vlt` did not apply in lint: its pattern `*/third_party/*` needs a folder in front, and
+     lint passed relative `third_party/...` paths (and did not load the file). Third-party `-y` folders
+     are now absolute and the file is loaded (`pio2_core`: 163 third-party warnings -> 8 SELRANGE).
+* **Found, not fixed**: `SYNCASYNCNET` on `cs_n` at `src/rtl/link/pio2_spi_phy.sv:93` (async reset and
+  synchronous use, an untested draft). It is real RTL work, not waived, so `rtl-lint` still fails and
+  `[SPEC-PIO-00]`, `[SPEC-PIO-01]`, `[SPEC-PIO-09]` stay failing on it.
+* **Hardware fact / false alarm**: the 9 warnings in our RTL are all TIMESCALEMOD (third-party files set
+  a timescale, ours do not); harmless, and not a rule the skill fails on.
+* **Process gap**: `[SPEC-VER-02]` (evidence ledger) is claimed by `trac.py` and `tests/test_trac.py` but
+  has no requirement text yet (open in `TODO.md`), so these tests hang on a tag with no requirement.
+* **Evidence**: three new tests failed on the old code; a fourth (our own RTL is not waived) passes on both,
+  by design. See the commit message for the suite result.
+* **Not verified**: `pio2_spi_phy` behaviour; lint with other Verilator versions (5.049 here); Icarus cocotb.
