@@ -103,13 +103,17 @@ class App:
         self.window = 600                   # clocks shown in the logic analyzer
         self.f_sys = 125e6
         self.sel_sm = 0
-        self.step_note = ""
+        self.step_note = ""                 # a step did not do what was asked (highlighted)
+        self.step_info = ""                 # what the last step did
+        self.follow = True                  # analyzer: move the view to the newest clocks next frame
+        self.view_x = (0.0, 0.0)            # analyzer: cycles in view
         self.load_example(example)
 
     # ------------------------------------------------------------ model
     def load_example(self, name):
         self.example_name = name
-        self.step_note = ""
+        self.step_note = self.step_info = ""
+        self.follow = True
         self.ex = self.b.load(name)
         self.speed, self.window = self.ex.speed, self.ex.window
 
@@ -120,26 +124,49 @@ class App:
         if self.running:
             self.advance(self.speed)
 
+    # @impl [SPEC-DBG-03] docs/DEBUGGER_SPECIFICATION.md
+    def step_clock(self):
+        """Step button: pauses when running, then steps and says what happened."""
+        self.running = False
+        self.step_note = ""
+        n = self.b.step_clock()
+        self.follow = True
+        self.step_info = "1 clock" if n == 1 else ""
+        if n != 1:
+            self.step_note = f"{n:,} clocks: a host script's register access cannot be split"
+
+    # @impl [SPEC-DBG-03] docs/DEBUGGER_SPECIFICATION.md
+    def step_instr(self, sm):
+        self.running = False
+        self.step_note = self.step_info = ""
+        st = self.s.sm_state(sm)
+        pc, text = st["pc"], next((t for a, _, t in self.s.listing(sm) if a == st["pc"]), "?")
+        a0 = self.b.access_clocks
+        try:
+            n = self.b.step_instr(sm, limit=STEP_LIMIT)
+        except SimError:
+            self.step_note = f"SM{sm} is disabled"
+            return
+        self.follow = True
+        if n >= STEP_LIMIT:
+            self.step_note = f"SM{sm} still stalled after {n:,} clocks (nothing retired)"
+            return
+        self.step_info = f"SM{sm} ran {pc}: {text} in {n:,} clock{'s' if n != 1 else ''}"
+        if self.b.access_clocks != a0:
+            self.step_note = "a host script's register access ran in this step: more may have run"
+
     # ------------------------------------------------------------ windows
     def controls(self):
         s = self.s
         if imgui.button("  Pause  " if self.running else "  Run  "):
             self.running = not self.running
-            self.step_note = ""
+            self.step_note = self.step_info = ""
         imgui.same_line()
-        imgui.begin_disabled(self.running)
         if imgui.button("Step clock"):
-            self.step_note = ""
-            self.b.step_clock()               # exactly one clock
+            self.step_clock()
         imgui.same_line()
         if imgui.button(f"Step instr SM{self.sel_sm}"):
-            try:
-                n = self.b.step_instr(self.sel_sm, limit=STEP_LIMIT)
-                self.step_note = (f"SM{self.sel_sm} still stalled after {n:,} clocks (nothing retired)"
-                                  if n >= STEP_LIMIT else "")
-            except SimError:
-                self.step_note = f"SM{self.sel_sm} is disabled"
-        imgui.end_disabled()
+            self.step_instr(self.sel_sm)
         imgui.same_line()
         if imgui.button("Reset"):
             self.load_example(self.example_name)
@@ -159,6 +186,9 @@ class App:
         imgui.text_colored(v4(ACCENT), f"cycle {self.b.cycle:,}")
         imgui.same_line()
         imgui.text_colored(v4(MUTED), f"{t * 1e6:,.2f} us at {self.f_sys / 1e6:.0f} MHz")
+        if self.step_info:
+            imgui.same_line()
+            imgui.text(self.step_info)
         if self.step_note:
             imgui.same_line()
             imgui.text_colored(v4(HIGH), self.step_note)
@@ -468,8 +498,9 @@ class App:
         tr = self.s.trace
         n = min(len(tr), self.window)
         imgui.set_next_item_width(220)
-        _, self.window = imgui.slider_int("clocks shown", self.window, 50, 50000,
-                                          flags=imgui.SliderFlags_.logarithmic)
+        changed, self.window = imgui.slider_int("clocks shown", self.window, 50, 50000,
+                                                flags=imgui.SliderFlags_.logarithmic)
+        self.follow = self.follow or changed
         if n == 0:
             return
         out = np.frombuffer(tr.out, dtype=np.uint32)[-n:]
@@ -479,7 +510,9 @@ class App:
         x0 = tr.start + len(tr) - n
         xs = np.arange(x0, x0 + n, dtype=np.float64)
         size = imgui.get_content_region_avail()
-        cond = imgui.Cond_.always if self.running else imgui.Cond_.once
+        # Paused the view is the user's to zoom and pan, until a step moves on to a new cycle.
+        cond = imgui.Cond_.always if self.running or self.follow else imgui.Cond_.once
+        self.follow = False
         h_pins = max(80.0, size.y * 0.55)
         probes = list(self.ex.probes)
         if implot.begin_plot("##pins", ImVec2(-1, h_pins), implot.Flags_.no_legend):
@@ -488,6 +521,8 @@ class App:
             implot.setup_axis_limits(implot.ImAxis_.y1, -0.3, len(probes) - 0.1, imgui.Cond_.always)
             names = [f"GP{p} {self.ex.labels.get(p, '')}".strip() for p in probes]
             implot.setup_axis_ticks(implot.ImAxis_.y1, [k + 0.35 for k in range(len(probes))], names)
+            lim = implot.get_plot_limits()
+            self.view_x = (lim.x.min, lim.x.max)
             for k, pin in enumerate(probes):
                 bits = ((inp >> pin) & 1).astype(np.float64)
                 driven = ((dir_ >> pin) & 1).astype(bool)

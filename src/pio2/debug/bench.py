@@ -140,6 +140,7 @@ class Bench:
         self.last_stop = None
         self.horizon = 0                   # furthest cycle of the current timeline
         self.origin = self.s.cycle
+        self.access_clocks = 0             # clocks spent in register accesses (a step reports them)
         self.s.set_access_hook(self._during_access)
         if example is not None:
             self.load(example)
@@ -233,17 +234,23 @@ class Bench:
         self.last_stop = hit
         return hit
 
+    # @impl [SPEC-DBG-03] docs/DEBUGGER_SPECIFICATION.md
     def step_clock(self):
-        if self._redo(self.s.cycle + 1):
-            return
+        """One clock; returns the clocks run. More than 1 when a host script's register access
+        came due: an access takes several clocks and cannot be split ([SPEC-DBG-03])."""
+        c0 = self.s.cycle
+        if self._redo(c0 + 1):
+            return self.s.cycle - c0
         self._new_action("clock")
         self._exec(self.history.log[-1])
         self.horizon = self.s.cycle
+        return self.s.cycle - c0
 
     def step_instr(self, sm, limit=10_000):
         """Run until SM `sm` retires one instruction ([SPEC-DBG-03]); parts act every clock.
-        Returns the clocks run (== limit: nothing retired). Behind the horizon this starts a new
-        timeline (not a replay)."""
+        Returns the clocks run (>= limit: nothing retired). A host script's register access inside
+        the step runs its clocks too, so other instructions can retire in it ([SPEC-DBG-03]).
+        Behind the horizon this starts a new timeline (not a replay)."""
         if not (self.s._get("sm_en") >> sm) & 1:
             raise SimError(f"SM{sm} is disabled")
         self._new_action("instr", (sm, limit))
@@ -291,6 +298,7 @@ class Bench:
         and responsive device models (SPI / I2C slaves, the ESC) look at the lines, so they keep
         answering while a host script's access runs. Host scripts are not called here (they make
         register accesses themselves); passive parts catch up after the access."""
+        self.access_clocks += 1
         c = self.s.cycle
         todo = [p for p in self.parts if not p.host
                 and (p.responsive or (p.schedule and p.schedule[0][0] <= c))]

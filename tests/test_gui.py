@@ -100,6 +100,21 @@ def test_every_control(app):
         c0 = app.s.cycle
         frames(ctx, 5)
         check(app.s.cycle > c0, "running advances the clock")
+
+        # A step button works while running: it pauses, then steps ([SPEC-DBG-03]) ------------
+        ctx.item_click("Step clock")
+        check(not app.running, "Step clock while running pauses")
+        check(app.step_info == "1 clock", f"Step clock says what it did: {app.step_info!r}")
+        c2 = app.s.cycle
+        frames(ctx, 5)
+        check(app.s.cycle == c2, f"stays paused after the step ({c2} -> {app.s.cycle})")
+        ctx.item_click("  Run  ")
+        check(app.running and app.step_info == "", "Run resumes and clears the step message")
+        frames(ctx, 3)
+        ctx.item_click("Step instr SM0")
+        check(not app.running, "Step instr while running pauses")
+        ctx.item_click("  Run  ")
+        frames(ctx, 3)
         ctx.item_click("  Pause  ")
         check(not app.running, "Pause stops")
         c1 = app.s.cycle
@@ -111,10 +126,40 @@ def test_every_control(app):
         check(app.s.cycle == c1 + 1, f"Step clock: +1 ({c1} -> {app.s.cycle})")
 
         # Step instr SM0: one instruction retired (PC moves, or a delay / loop clock passes) --------
-        before = (app.s.cycle, app.s.sm_state(0)["pc"])
+        # Blink's delay loop: the PC stays on 4, so X is what proves exactly one instruction ran.
+        while app.s.sm_state(0)["pc"] != 4 or app.s.sm_state(0)["reg_x"] < 10:
+            app.b.step_clock()
+        before = (app.s.cycle, app.s.sm_state(0)["reg_x"])
         ctx.item_click("Step instr SM0")
-        check(app.s.cycle > before[0], "Step instr runs at least one clock")
+        check(app.s.cycle == before[0] + 1, f"Step instr at divider 1: +1 ({before[0]} -> {app.s.cycle})")
+        check(app.s.sm_state(0)["reg_x"] == before[1] - 1, "Step instr ran exactly one jmp x--")
         check(app.step_note == "", f"Step instr SM0 note: {app.step_note!r}")
+        check(app.step_info == "SM0 ran 4: jmp x--, 4 in 1 clock", f"Step instr says what ran: {app.step_info!r}")
+
+        # The logic analyzer shows the new cycle after a step, and the slider applies while paused
+        app.window = 100
+        app.follow = True
+        frames(ctx, 2)
+        for _ in range(150):                      # further than the view is wide
+            app.b.step_clock()
+        ctx.item_click("Step clock")
+        frames(ctx, 2)
+        end = app.s.trace.start + len(app.s.trace) - 1
+        check(app.view_x[1] == end, f"analyzer follows the step (view ends {app.view_x[1]}, trace {end})")
+        check(app.view_x[1] - app.view_x[0] == 99, f"analyzer view width {app.view_x}")
+
+        # A host script's register access inside a step is reported, not hidden ---------------
+        app.load_example("UART TX")
+        frames(ctx, 1)
+        c3 = app.s.cycle
+        ctx.item_click("Step clock")
+        check(app.s.cycle > c3 + 1, "UART TX: first step includes the feeder's accesses")
+        check(f"{app.s.cycle - c3:,} clocks" in app.step_note and "host script" in app.step_note,
+              f"overshoot reported: {app.step_note!r}")
+        app.load_example("Blink")
+        app.running = False
+        frames(ctx, 1)
+        c1 = app.s.cycle
 
         # SM tabs select the SM; stepping a disabled SM says so ---------------------------------
         ctx.set_ref("State machines")

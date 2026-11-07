@@ -426,7 +426,8 @@ class Session:
         self._drain()
 
     def step_instr(self, sm, limit=1_000_000, on_clock=None):
-        """Run until SM `sm` retires one instruction ([SPEC-DBG-03]) and return the clocks run.
+        """Run until SM `sm` retires one instruction ([SPEC-DBG-03]) and return the clocks run,
+        register accesses made by `on_clock` included (>= limit: nothing retired).
         An instruction retires on a clock where the SM's clock enable fires with no delay pending
         and the SM is not stalled afterwards; a stalled instruction keeps running (and does not
         retire) until it can complete. `on_clock()` runs after every clock (the bench updates its
@@ -434,17 +435,18 @@ class Session:
         if not (self._get("sm_en") >> sm) & 1:      # VPI: a register read would run clocks
             raise SimError(f"SM{sm} is disabled")
         base = f"gen_sm[{sm}].u_sm."
-        for k in range(1, limit + 1):
+        c0 = self.cycle
+        while self.cycle - c0 < limit:
             fire = self._get(base + "sm_clk_enable") and self._get(base + "delay_cycles") == 0
             pc0 = self._get(base + "pc")
             self.step(1)
             if on_clock is not None:
                 on_clock()
             if fire and not self._get(base + "stalled"):
-                return k
+                break
             if self._get(base + "pc") != pc0:
-                return k
-        return limit
+                break
+        return self.cycle - c0
 
     # ---------------------------------------------------------------- state
     def _get(self, name, index=None, nwords=1):

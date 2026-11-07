@@ -107,9 +107,20 @@ flowchart TB
   run N cycles; run until a breakpoint; pause.
 * **Requirement**: "instruction retired" is derived from the exposed state (PC change, or same PC with
   the delay counter and stall cleared), and the rule is tested against the conformance programs.
+* **Requirement**: stepping does not change what the program does: every example stepped by clock, and
+  stepped by instruction, gives the same per-clock trace as running it. Both step calls return the
+  clocks actually run.
+* **Requirement**: a host script (a part that makes register accesses) acts at its own cycle, also
+  inside a step. An access takes several clocks and cannot be split, so that step runs more than one
+  clock and can retire more than one instruction. This is a known limit, and the GUI says so on that
+  step with the clocks run.
+* **Requirement**: in the GUI a step button works in every state: while running it pauses, then steps.
+  Every step reports what it did (clocks run; for an instruction step, what ran), and the logic
+  analyzer shows the new cycle.
 * **Verified by**: `host-tests` (`tests/test_debug_conformance.py`: conformance programs stepped by clock and by
-  instruction give the cocotb suite's results)
-* **Implementation Target**: `src/pio2/debug/session.py`
+  instruction give the cocotb suite's results; `tests/test_debug_bench.py`: every example stepped gives the
+  run's trace; `tests/test_gui.py`: the buttons, clicked)
+* **Implementation Target**: `src/pio2/debug/session.py`, `src/pio2/debug/bench.py`, `src/pio2/gui/app.py`
 
 ### `[SPEC-DBG-04]` Breakpoints and Watchpoints
 * **Requirement**: breakpoints on PC per SM; watchpoints on a pin edge, an IRQ flag, a FIFO level, X/Y

@@ -566,3 +566,36 @@ Format and categories as in AbstractX `engineering_log.md`. Earlier PIO history 
   `pio2-debug`; screenshots of both new examples reviewed; SpecTrace drift 0, skills 0, verifies 2.
 * **Not verified**: the FC board on hardware; DMA ring overflow behaviour in the GUI; parts do not
   show their state yet (strip colours, ESC RPM).
+
+## 2026-11-06: Step clock / Step instr looked broken in the GUI; the tests did not check them properly
+
+* **Category**: `product-bug` (4), `process-gap`
+* **What**: the user reported that the step buttons do not work. The model was stepping correctly (every
+  example stepped by clock and by instruction gives the run's per-clock trace, also before the fix); the
+  GUI around it was wrong:
+  1. The app opens running, and running disabled both step buttons (only slightly dimmed, no message), so
+     a click after launch did nothing. A step button now pauses, then steps.
+  2. A step showed almost nothing: on Blink the PC stays on `jmp x--, 4` for 3000 instructions. Each step
+     now says what it did ("SM0 ran 4: jmp x--, 4 in 1 clock").
+  3. The logic analyzer's view stayed put while paused (`Cond_.once`), so new clocks fell outside it; the
+     "clocks shown" slider had no effect on the view either. A step and the slider now move it.
+  4. Host scripts' register accesses ran inside a step, unreported: `Step clock` ran up to 91 clocks and
+     `Step instr` up to 91 PC changes (Quadrature; 3000 step clocks / 300 step instrs per example, RTL
+     trace). The step's return value also counted loop passes, not clocks. Both calls now return the clocks
+     run, and the GUI reports an overshoot.
+* **Known limit, not fixed**: an access still cannot be split, so such a step is still longer than asked.
+  Splitting one needs host scripts that can stop mid-access (coroutines), and reverse step would have to
+  save that state. Spec: [SPEC-DBG-03]. Listed in `TODO.md`.
+* **Process gap (test)**: "tested" overstated it. `Session.step_instr` had real tests; `Bench.step_instr`,
+  which the button calls, had none. The GUI test paused first, so it never met the disabled buttons, ran
+  only Blink (no host script), and accepted any Step instr that ran at least one clock. A green test named
+  after a control said little about whether the control did its job.
+* **Tool fact**: a numpy view from `np.frombuffer` on a trace array makes the next trace append raise
+  `cannot resize an array that is exporting buffers`. It hit a scratch measuring script that kept a view
+  across a step; the GUI's views are locals of one frame.
+* **Evidence**: `pytest tests` 605 passed, 1 failed (known `test_trace_ctf`); 7 bugs put back one at a
+  time, each failed a test; real window driven on Blink and UART TX, screenshot reviewed; SpecTrace drift 0,
+  skills 0, verifies 2 (pre-existing).
+* **Not verified**: a real mouse (clicks come from ImGui Test Engine); the overshoot message in the real
+  window (null backend test only); stepping behind the horizon from the GUI (no Back control); at the widest
+  analyzer views one clock is under a pixel, so a single step is not visible there.

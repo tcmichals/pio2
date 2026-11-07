@@ -335,3 +335,6 @@ Ranked. Each item: failing test first, then RTL / code, then the skill in its `V
 * `pio2-programs --check` (needs pioasm: `uv run pio2-setup-tools --pioasm`)
 * `pio2-setup-tools --oss-cad-suite` download path
 * anything on a board
+
+* Debugger: split host-script register accesses so a step stops inside one ([SPEC-DBG-03]; today the GUI
+  reports the overshoot). Needs host scripts that can stop mid-access, and reverse step saving that state.
