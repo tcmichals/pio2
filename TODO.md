@@ -271,6 +271,9 @@ Next steps, in order:
    speed and agreement. "Best" is then a table, not a claim.
 Board items (live board trace, silicon diff, Tang fit) come after these.
 
+* Debugger: split host-script register accesses so a step stops inside one ([SPEC-DBG-03]; today the GUI
+  reports the overshoot). Needs host scripts that can stop mid-access, and reverse step saving that state.
+
 ## Blocker: the tile does not fit the Tang boards (found 2026-10-31)
 
 AbstractX top needs 261 % of the 9K's LUTs and 110 % of the 20K's; the tile alone is ~29k LUT
@@ -335,6 +338,3 @@ Ranked. Each item: failing test first, then RTL / code, then the skill in its `V
 * `pio2-programs --check` (needs pioasm: `uv run pio2-setup-tools --pioasm`)
 * `pio2-setup-tools --oss-cad-suite` download path
 * anything on a board
-
-* Debugger: split host-script register accesses so a step stops inside one ([SPEC-DBG-03]; today the GUI
-  reports the overshoot). Needs host scripts that can stop mid-access, and reverse step saving that state.
