@@ -15,7 +15,7 @@ pio2 follows the AbstractX SpecTrace rules (AbstractX `AGENTS.md`, `docs/SPECTRA
 3. **Check with the skills** named in `Verified by` (`.agents/skills/<name>/SKILL.md`; Claude Code reads
    them through `.claude/skills`). SpecTrace runs from an AbstractX checkout:
    ```bash
-   A=../AbstractX   # or $ABSTRACTX_DIR
+   A=${ABSTRACTX_DIR:-.}
    python3 $A/tools/spectrace_matrix.py --root . --matrix
    python3 $A/tools/spectrace_matrix.py --root . --check-drift
    python3 $A/tools/spectrace_matrix.py --root . --check-skills

@@ -9,7 +9,7 @@
 
 Records use AbstractX's evidence ledger format ([SPEC-AUDIT-09] in AbstractX docs/SPECTRACE.md), one
 JSON line per requirement in docs/verification/evidence/<YYYY-MM>/<host>.jsonl, so
-`python3 ../AbstractX/tools/spectrace_matrix.py --root . --matrix` turns them into VERIFIED, FAILING
+`python3 $ABSTRACTX_PATH/tools/spectrace_matrix.py --root . --matrix` turns them into VERIFIED, FAILING
 or STALE. Its rules: a record counts for the requirement whose tag it lists; it goes stale when the
 spec file or a file with the requirement's @impl changed after the recorded commit.
 
